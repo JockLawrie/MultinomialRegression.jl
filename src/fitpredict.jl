@@ -12,7 +12,7 @@ function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing)
     nclasses = length(ycount)
     probs    = fill(0.0, nclasses)
     nx       = size(X, 2)
-    B0       = fill(0.0, nx * (nclasses - 1))  # TODO: Set this to correspond to ycount
+    B0       = fill(0.0, nx * (nclasses - 1))
     loss     = isnothing(reg) ? B -> -loglikelihood!(probs, y, X, B) : B -> -loglikelihood!(probs, y, X, B) + regularize(reg, B)
     opts     = Optim.Options(time_limit=60, f_tol=1e-6)  # Debug with show_trace=true
     mdl      = optimize(loss, B0, LBFGS(), opts)

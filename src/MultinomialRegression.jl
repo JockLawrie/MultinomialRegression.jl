@@ -1,6 +1,6 @@
 module MultinomialRegression
 
-export fit, predict
+export fit, predict, L1, L2
 
 include("regularization.jl")
 include("fitpredict.jl")
