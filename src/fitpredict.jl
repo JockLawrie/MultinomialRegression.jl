@@ -16,7 +16,11 @@ function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing)
     loss     = isnothing(reg) ? B -> -loglikelihood!(probs, y, X, B) : B -> regularize(reg, B) - loglikelihood!(probs, y, X, B)
     opts     = Optim.Options(time_limit=60, f_tol=1e-6)  # Debug with show_trace=true
     mdl      = optimize(loss, B0, LBFGS(), opts)
-    reshape(mdl.minimizer, nx, nclasses - 1)
+    result   = reshape(mdl.minimizer, nx, nclasses - 1)
+    if reg isa BoxRegularizer
+        regularize(reg, result)  # Constrain B to the box specified by reg
+    end
+    result
 end
 
 predict(B, x) = update_probs!(fill(0.0, 1 + size(B, 2)), B, x)

@@ -1,8 +1,11 @@
 module regularization
 
-export regularize, AbstractRegularizer, L1, L2
+export regularize, AbstractRegularizer, L1, L2, BoxRegularizer
 
 abstract type AbstractRegularizer end
+
+################################################################################
+# L1
 
 struct L1 <: AbstractRegularizer
     gamma::Float64
@@ -15,6 +18,9 @@ end
 
 regularize(reg::L1, B) = reg.gamma * sum(abs(x) for x in B)
 
+################################################################################
+# L2
+
 struct L2 <: AbstractRegularizer
     lambda::Float64
 
@@ -26,5 +32,27 @@ end
 
 regularize(reg::L2, B) = 0.5 * reg.lambda * sum(x^2 for x in B)
 
+################################################################################
+# BoxRegularizer
+
+"Constrains each parameter in B to be in [lowerbound, upperbound]."
+struct BoxRegularizer <: AbstractRegularizer
+    lowerbound::Float64
+    upperbound::Float64
+
+    function BoxRegularizer(lb, ub)
+        lb >= ub && error("The lower bound must be strictly lower than the upper bound.")
+        new(lb, ub)
+    end
+end
+
+function regularize(reg::BoxRegularizer, B)
+    lb    = reg.lowerbound
+    width = reg.upperbound - lb
+    for (i, x) in enumerate(B)
+        B[i] = lb + width / (1.0 + exp(-x))
+    end
+    0.0
+end
 
 end
