@@ -52,7 +52,6 @@ function regularize!(outB, inB, reg::BoxRegularizer)
     for (i, x) in enumerate(inB)
         outB[i] = lb + width / (1.0 + exp(-x))
     end
-    0.0
 end
 
 end
