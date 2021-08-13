@@ -24,6 +24,15 @@ pmean = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
 isapprox(pmean, 0.9754110790815228; atol=1e-10)  # Reproducible result
 isapprox(B, B2; atol=1e-10)  # Reproducible result
 
+# L1 regularised fit
+B      = fit(y, X, L1(0.5))
+iris.p = [predict(B, X[i, :]) for i = 1:nrow(iris)]
+pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
+
+B2 = [0.00042032861541274033 -2.58718849526787; -2.5414583814397878 -5.616544083781685; 2.830281443852675 6.744269301217415; -6.813216614176428e-5 5.750558760119114; -7.180649571693045e-5 -3.7317514282097215]
+isapprox(pmean, 0.9293545829839637; atol=1e-10)
+isapprox(B, B2; atol=1e-10)
+
 # L2 regularised fit
 B      = fit(y, X, L2(0.5))
 iris.p = [predict(B, X[i, :]) for i = 1:nrow(iris)]
