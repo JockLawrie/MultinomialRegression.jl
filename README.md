@@ -1,9 +1,8 @@
-# MultinomiaRegression.jl
+# MultinomialRegression.jl
 
 ```julia
-using MultinomialRegression
-
 using DataFrames
+using MultinomialRegression
 using RDatasets
 using Statistics
 
