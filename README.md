@@ -10,37 +10,37 @@ using Statistics
 iris = dataset("datasets", "iris")
 iris.intercept = fill(1.0, nrow(iris))
 y = iris.Species.refs
-X = Matrix(iris[:, [1,2,3,4,6]])
+X = Matrix(iris[:, ["intercept", "SepalLength", "SepalWidth", "PetalLength", "PetalWidth"]])
 
 # Unregularized fit
 B      = fit(y, X)
-iris.p = [predict(B, X[i, :])  for i = 1:nrow(iris)]   # Each prediction is a vector of probabilities
+iris.p = [predict(B, X[i, :]) for i = 1:nrow(iris)]    # Each prediction is a vector of probabilities
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])  # Mean Pr(Y = y[i])
-B2     = [-7.927818200468233 -10.393072311241966; -18.70033161617695 -25.38119065922222; 26.76422074394354 36.19365886259815; 5.558371894028679 23.844497063952385; 16.716166099230357 -25.92176161756603]
-isapprox(pmean, 0.9754110790815228; atol=1e-10)  # Reproducible result
-isapprox(B, B2; atol=1e-10)  # Reproducible result
+B2     = [12.492550959964307 -30.145511838513336; -13.805841696210813 -16.27098488581211; -39.46413451928773 -46.145154218613975; 61.59580691999151 71.02512875924981; 21.499505874304305 39.78592272496369]
+@test isapprox(pmean, 0.9754110798138272; atol=1e-10)  # Reproducible result
+@test isapprox(B, B2; atol=1e-10)  # Reproducible result
 
 # L1 regularized fit
 B      = fit(y, X, L1(0.5))
-iris.p = [predict(B, X[i, :])  for i = 1:nrow(iris)]
+iris.p = [predict(B, X[i, :]) for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
-B2     = [0.00042032861541274033 -2.58718849526787; -2.5414583814397878 -5.616544083781685; 2.830281443852675 6.744269301217415; -6.813216614176428e-5 5.750558760119114; -7.180649571693045e-5 -3.7317514282097215]
-isapprox(pmean, 0.9293545829839637; atol=1e-10)
-isapprox(B, B2; atol=1e-10)
+B2     = [-2.176030356478348e-5 -3.368372096445269; -4.6375342534571835e-5 -2.659295361335591; -2.5407374384134696 -5.712585768725875; 2.829164602857422 6.800714978069462; 3.628185714330291e-5 5.798698371948723]
+@test isapprox(pmean, 0.9293218278737707; atol=1e-10)
+@test isapprox(B, B2; atol=1e-10)
 
 # L2 regularized fit
 B      = fit(y, X, L2(0.5))
 iris.p = [predict(B, X[i, :]) for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
-B2     = [-0.2003117733232103 -1.9810446456446502; -1.8218221042649223 -3.080450064972763; 2.1852233068431217 4.507699288823395; -0.24007026523207944 3.4037938446516254; 0.7910229216904574 -1.835692080815499]
-isapprox(pmean, 0.8710102985804118; atol=1e-10)
-isapprox(B, B2; atol=1e-10)
+B2     = [0.7945515804552191 -1.8331489499819589; -0.19925209776764655 -1.9809068067370361; -1.8239979618578914 -3.0818164583764194; 2.18416811002322 4.507783033080395; -0.24055279601414303 3.4020416953749906]
+@test isapprox(pmean, 0.8710024596383066; atol=1e-10)
+@test isapprox(B, B2; atol=1e-10)
 
-# Box regularized fit (constrain each parameter to be in [lowerbound, upperbound])
+# Box regularized fit (constrain each parameter to be with [lowerbound, upperbound])
 B      = fit(y, X, BoxRegularizer(-10.0, 10.0))
 iris.p = [predict(B, X[i, :]) for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
-B2     = [-0.8223919188909896 -2.8642333258909405; -6.173378010459203 -9.999999996745983; 4.589783517716626 9.999999999977799; -0.24843895714178466 9.999999999877144; 9.999779141719259 -9.999973575950278]
-isapprox(pmean, 0.9642863884564836; atol=1e-10)
-isapprox(B, B2; atol=1e-10)
+B2     = [9.998861432630893 -9.999860147735738; -0.8235495447737922 -2.863978840177503; -6.173999928766744 -9.99999986003335; 4.591535394661463 9.999999999998991; -0.2467962531036445 9.999999999492559]
+@test isapprox(pmean, 0.9642848030231086; atol=1e-10)
+@test isapprox(B, B2; atol=1e-10)
 ```

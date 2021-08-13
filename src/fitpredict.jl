@@ -46,29 +46,23 @@ function loglikelihood!(probs, y, X, B)
     ni = length(y)
     for i = 1:ni
         update_probs!(probs, B2, view(X, i, :))
-        p   = max(probs[y[i]], 1e-10)
+        p   = max(probs[y[i]], 1e-12)
         LL += log(p)
     end
     LL
 end
 
 function update_probs!(probs, B, x)
-    # Populate probs with the bx and find their maximum
     probs[1] = 0.0  # bx for first category is 0
-    max_bx   = 0.0
+    max_bx   = 0.0  # Find max bx for numerical stability
     nclasses = length(probs)
-    for j = 2:nclasses
-        bx       = dot(x, view(B, :, j - 1))
-        probs[j] = bx
+    for c = 2:nclasses
+        bx       = dot(x, view(B, :, c - 1))
+        probs[c] = bx
         max_bx   = bx > max_bx ? bx : max_bx
     end
-    # Calculate the numerators and the denominator of the probabilities
-    denom = 0.0
-    for j = 1:nclasses
-        probs[j] = max(exp(probs[j] - max_bx), 1e-12)  # Subtract max_bx first for numerical stability (then val <= 1)
-        denom   += probs[j]
-    end
-    probs ./= denom  # Normalise. We know that denom >= 1, so this will work.
+    probs .= exp.(probs .- max_bx)  # Subtract max_bx first for numerical stability. Then prob[c] <= 1.
+    normalize!(probs, 1)
 end
 
 function countmap(y)
