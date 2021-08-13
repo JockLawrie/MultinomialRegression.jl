@@ -13,7 +13,7 @@ iris.intercept = fill(1.0, nrow(iris))
 y = iris.Species.refs
 X = Matrix(iris[:, [1,2,3,4,6]])
 
-# Unregularised fit
+# Unregularized fit
 B      = fit(y, X)
 iris.p = [predict(B, X[i, :])  for i = 1:nrow(iris)]   # Each prediction is a vector of probabilities
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])  # Mean Pr(Y = y[i])
@@ -21,7 +21,7 @@ B2     = [-7.927818200468233 -10.393072311241966; -18.70033161617695 -25.3811906
 isapprox(pmean, 0.9754110790815228; atol=1e-10)  # Reproducible result
 isapprox(B, B2; atol=1e-10)  # Reproducible result
 
-# L1 regularised fit
+# L1 regularized fit
 B      = fit(y, X, L1(0.5))
 iris.p = [predict(B, X[i, :])  for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
@@ -29,7 +29,7 @@ B2     = [0.00042032861541274033 -2.58718849526787; -2.5414583814397878 -5.61654
 isapprox(pmean, 0.9293545829839637; atol=1e-10)
 isapprox(B, B2; atol=1e-10)
 
-# L2 regularised fit
+# L2 regularized fit
 B      = fit(y, X, L2(0.5))
 iris.p = [predict(B, X[i, :]) for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
@@ -37,7 +37,7 @@ B2     = [-0.2003117733232103 -1.9810446456446502; -1.8218221042649223 -3.080450
 isapprox(pmean, 0.8710102985804118; atol=1e-10)
 isapprox(B, B2; atol=1e-10)
 
-# Box regularized fit (constrain each parameter to be with [lowerbound, upperbound])
+# Box regularized fit (constrain each parameter to be in [lowerbound, upperbound])
 B      = fit(y, X, BoxRegularizer(-10.0, 10.0))
 iris.p = [predict(B, X[i, :]) for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
