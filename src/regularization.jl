@@ -1,6 +1,6 @@
 module regularization
 
-export regularize, AbstractRegularizer, L1, L2, BoxRegularizer
+export regularize, regularize!, AbstractRegularizer, L1, L2, BoxRegularizer
 
 abstract type AbstractRegularizer end
 
@@ -46,11 +46,11 @@ struct BoxRegularizer <: AbstractRegularizer
     end
 end
 
-function regularize(reg::BoxRegularizer, B)
+function regularize!(outB, inB, reg::BoxRegularizer)
     lb    = reg.lowerbound
     width = reg.upperbound - lb
-    for (i, x) in enumerate(B)
-        B[i] = lb + width / (1.0 + exp(-x))
+    for (i, x) in enumerate(inB)
+        outB[i] = lb + width / (1.0 + exp(-x))
     end
     0.0
 end

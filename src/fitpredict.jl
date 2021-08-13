@@ -12,21 +12,31 @@ function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing)
     nclasses = length(ycount)
     probs    = fill(0.0, nclasses)
     nx       = size(X, 2)
+    loss     = get_loss_function(reg, probs, y, X, nx, nclasses)
     B0       = fill(0.0, nx * (nclasses - 1))
-    loss     = isnothing(reg) ? B -> -loglikelihood!(probs, y, X, B) : B -> regularize(reg, B) - loglikelihood!(probs, y, X, B)
     opts     = Optim.Options(time_limit=60, f_tol=1e-6)  # Debug with show_trace=true
     mdl      = optimize(loss, B0, LBFGS(), opts)
-    result   = reshape(mdl.minimizer, nx, nclasses - 1)
-    if reg isa BoxRegularizer
-        regularize(reg, result)  # Constrain B to the box specified by reg
-    end
-    result
+    B        = reshape(mdl.minimizer, nx, nclasses - 1)
+    reg isa BoxRegularizer && regularize!(B, B, reg)  # Constrain B to the box specified by reg
+    B
 end
 
 predict(B, x) = update_probs!(fill(0.0, 1 + size(B, 2)), B, x)
 
 ################################################################################
 # unexported
+
+get_loss_function(reg, probs, y, X, nx, nclasses) = B -> regularize(reg, B) - loglikelihood!(probs, y, X, B)
+
+get_loss_function(reg::Nothing, probs, y, X, nx, nclasses) = B -> -loglikelihood!(probs, y, X, B)
+
+function get_loss_function(reg::BoxRegularizer, probs, y, X, nx, nclasses)
+    outB = fill(0.0, nx, nclasses - 1)
+    B -> begin
+        regularize!(outB, B, reg)
+        -loglikelihood!(probs, y, X, outB)
+    end
+end
 
 function loglikelihood!(probs, y, X, B)
     LL = 0.0
