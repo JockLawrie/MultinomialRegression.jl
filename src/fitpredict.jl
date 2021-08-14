@@ -8,7 +8,7 @@ using Optim
 using ..regularization
 
 function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, Optim.Options}=nothing)
-    nclasses = length(unique(y))
+    nclasses = maximum(y)
     nx       = size(X, 2)
     probs    = fill(0.0, nclasses)
     B0       = fill(0.0, nx * (nclasses - 1))
