@@ -7,17 +7,15 @@ using Optim
 
 using ..regularization
 
-function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing)
-    ycount   = countmap(y)
-    nclasses = length(ycount)
-    probs    = fill(0.0, nclasses)
+function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, Optim.Options}=nothing)
+    nclasses = length(unique(y))
     nx       = size(X, 2)
-    loss     = get_loss_function(reg, probs, y, X, nx, nclasses)
+    probs    = fill(0.0, nclasses)
     B0       = fill(0.0, nx * (nclasses - 1))
-    opts     = Optim.Options(time_limit=60, f_tol=1e-6)  # Debug with show_trace=true
-    mdl      = optimize(loss, B0, LBFGS(), opts)
+    fg!      = get_fg!(reg, probs, y, X)  # Debug with opts = Optim.Options(show_trace=true)
+    mdl      = isnothing(opts) ? optimize(Optim.only_fg!(fg!), B0, LBFGS()) : optimize(Optim.only_fg!(fg!), B0, LBFGS(), opts)
     B        = reshape(mdl.minimizer, nx, nclasses - 1)
-    reg isa BoxRegularizer && regularize!(B, B, reg)  # Constrain B to the box specified by reg
+    reg isa BoxRegularizer && regularize!(B, reg)  # Constrain B to the box specified by reg
     B
 end
 
@@ -26,28 +24,43 @@ predict(B, x) = update_probs!(fill(0.0, 1 + size(B, 2)), B, x)
 ################################################################################
 # unexported
 
-get_loss_function(reg, probs, y, X, nx, nclasses) = B -> regularize(reg, B) - loglikelihood!(probs, y, X, B)
+# L1 or L2 regularization
+get_fg!(reg, probs, y, X) = (_, gradB, B) -> regularize(reg, B, gradB) - loglikelihood!(probs, y, X, B, gradB)
 
-get_loss_function(reg::Nothing, probs, y, X, nx, nclasses) = B -> -loglikelihood!(probs, y, X, B)
-
-function get_loss_function(reg::BoxRegularizer, probs, y, X, nx, nclasses)
-    outB = fill(0.0, nx, nclasses - 1)
-    B -> begin
-        regularize!(outB, B, reg)
-        -loglikelihood!(probs, y, X, outB)
+# No regularization
+function get_fg!(reg::Nothing, probs, y, X)
+    (_, gradB, B) -> begin
+        fill!(gradB, 0.0)
+        -loglikelihood!(probs, y, X, B, gradB)
     end
 end
 
-function loglikelihood!(probs, y, X, B)
+# Box regularization
+function get_fg!(reg::BoxRegularizer, probs, y, X)
+    nx       = size(X, 2)
+    nclasses = length(probs)
+    outB     = fill(0.0, nx * (nclasses - 1))
+    (_, gradB, B) -> begin
+        regularize!(outB, B, reg, gradB)
+        -loglikelihood!(probs, y, X, outB, gradB)
+    end
+end
+
+function loglikelihood!(probs, y, X, b::Vector, gradb::Vector)
+    nx    = size(X, 2)
+    nj    = Int(length(b) / nx)
+    B     = reshape(b, nx, nj)
+    gradB = reshape(gradb, nx, nj)
+    loglikelihood!(probs, y, X, B, gradB)
+end
+
+function loglikelihood!(probs, y, X, B::Matrix, gradB::Matrix)
     LL = 0.0
-    nx = size(X, 2)
-    nj = Int(length(B) / nx)
-    B2 = reshape(B, nx, nj)
-    ni = length(y)
-    for i = 1:ni
-        update_probs!(probs, B2, view(X, i, :))
-        p   = max(probs[y[i]], 1e-12)
-        LL += log(p)
+    for (i, yi) in enumerate(y)
+        x = view(X, i, :)
+        update_probs!(probs, B, x)
+        update_gradient!(gradB, probs, yi, x)
+        LL += log(max(probs[yi], 1e-12))
     end
     LL
 end
@@ -65,16 +78,20 @@ function update_probs!(probs, B, x)
     normalize!(probs, 1)
 end
 
-function countmap(y)
-    result = Dict{eltype(y), Int}()
-    for x in y
-        if haskey(result, x)
-            result[x] += 1
-        else
-            result[x] = 1
+function update_gradient!(gradB, probs, yi, x)
+    nclasses = length(probs)
+    nx = length(x)
+    for c = 2:nclasses
+        p = probs[c]
+        for (j, xj) in enumerate(x)
+            gradB[j, c - 1] += p * xj  # Negative gradient because function is to be minimized
         end
     end
-    result
+    yi == 1 && return nothing
+    for (j, xj) in enumerate(x)
+        gradB[j, yi - 1] -= xj  # Negative gradient because function is to be minimized
+    end
+    nothing
 end
 
 end

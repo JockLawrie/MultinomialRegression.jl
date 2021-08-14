@@ -16,7 +16,13 @@ struct L1 <: AbstractRegularizer
     end
 end
 
-regularize(reg::L1, B) = reg.gamma * sum(abs(x) for x in B)
+function regularize(reg::L1, B, gradB)
+    gamma = reg.gamma
+    for (i, x) in enumerate(B)
+        gradB[i] = x < 0 ? -gamma : gamma
+    end
+    gamma * sum(abs(x) for x in B)
+end
 
 ################################################################################
 # L2
@@ -30,7 +36,11 @@ struct L2 <: AbstractRegularizer
     end
 end
 
-regularize(reg::L2, B) = 0.5 * reg.lambda * sum(x^2 for x in B)
+function regularize(reg::L2, B, gradB)
+    lambda = reg.lambda
+    gradB .= lambda .* B
+    0.5 * lambda * sum(x^2 for x in B)
+end
 
 ################################################################################
 # BoxRegularizer
@@ -46,11 +56,26 @@ struct BoxRegularizer <: AbstractRegularizer
     end
 end
 
-function regularize!(outB, inB, reg::BoxRegularizer)
+# Called by the solver
+function regularize!(outB, inB, reg::BoxRegularizer, gradB)
     lb    = reg.lowerbound
     width = reg.upperbound - lb
     for (i, x) in enumerate(inB)
-        outB[i] = lb + width / (1.0 + exp(-x))
+        pw       = width / (1.0 + exp(-x))  # p*w, where p = 1/(1+exp(-x))
+        outB[i]  = lb + pw
+        gradB[i] = pw - pw*pw/width  # w * p * (1 - p)
+    end
+end
+
+#=
+   Called after the solver, for returning values in the specified box.
+   Same as previous version but excludes updating the gradient.
+=# 
+function regularize!(B, reg::BoxRegularizer)
+    lb    = reg.lowerbound
+    width = reg.upperbound - lb
+    for (i, x) in enumerate(B)
+        B[i] = lb + width / (1.0 + exp(-x))
     end
 end
 
