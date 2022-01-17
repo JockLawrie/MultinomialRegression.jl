@@ -8,15 +8,29 @@ using Optim
 using ..regularization
 
 function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, Optim.Options}=nothing)
+    # Fit
     nclasses = maximum(y)
     nx       = size(X, 2)
     probs    = fill(0.0, nclasses)
     B0       = fill(0.0, nx * (nclasses - 1))
     fg!      = get_fg!(reg, probs, y, X)  # Debug with opts = Optim.Options(show_trace=true)
     mdl      = isnothing(opts) ? optimize(Optim.only_fg!(fg!), B0, LBFGS()) : optimize(Optim.only_fg!(fg!), B0, LBFGS(), opts)
-    B        = reshape(mdl.minimizer, nx, nclasses - 1)
+    theta    = mdl.minimizer
+    B        = reshape(theta, nx, nclasses - 1)
     reg isa BoxRegularizer && regularize!(B, reg)  # Constrain B to the box specified by reg
-    B
+
+    # Collect stderror
+    f      = TwiceDifferentiable(b -> loglikelihood_for_hessian!(y, X, b), theta; autodiff=:forward)
+    hess   = Optim.hessian!(f, theta)
+    ntheta = length(theta)
+    if rank(hess) == ntheta
+        varcov = inv(-hess)   # varcov(theta) = inv(FisherInformation) = inv(-Hessian)
+        se     = [sqrt(abs(varcov[i,i])) for i = 1:ntheta]  # abs for negative values very close to 0
+        se     = reshape(se, nx, nclasses - 1)
+    else
+        se = fill(NaN, nx, nclasses - 1)
+    end
+    (params=B, stderror=se)
 end
 
 predict(B, x) = update_probs!(fill(0.0, 1 + size(B, 2)), B, x)
@@ -92,6 +106,21 @@ function update_gradient!(gradB, probs, yi, x)
         gradB[j, yi - 1] -= xj  # Negative gradient because function is to be minimized
     end
     nothing
+end
+
+"Called only for calculating the Hessian after optimization"
+function loglikelihood_for_hessian!(y, X, b::AbstractVector{T}) where T
+    nx    = size(X, 2)
+    nj    = Int(length(b) / nx)
+    B     = reshape(b, nx, nj)
+    probs = zeros(T, 1 + nj)  # Must accommodate ForardDiff.Dual
+    LL    = 0.0
+    for (i, yi) in enumerate(y)
+        x = view(X, i, :)
+        update_probs!(probs, B, x)
+        LL += log(max(probs[yi], 1e-12))
+    end
+    LL
 end
 
 end
