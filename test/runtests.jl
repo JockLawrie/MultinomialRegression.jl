@@ -34,6 +34,7 @@ function mlj_predict(X, B)
 end
 
 include("iris.jl")
-include("compare_to_MLJLinearModels.jl")
+include("alligators.jl")
+#include("compare_to_MLJLinearModels.jl")
 
 @info "$(now()) Finished"
