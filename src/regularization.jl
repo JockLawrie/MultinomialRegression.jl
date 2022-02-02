@@ -56,7 +56,7 @@ struct BoxRegularizer <: AbstractRegularizer
     end
 end
 
-# Called by the solver
+"Modifed: outB, inB, gradB"
 function regularize!(outB, inB, reg::BoxRegularizer, gradB)
     lb    = reg.lowerbound
     width = reg.upperbound - lb
@@ -65,18 +65,7 @@ function regularize!(outB, inB, reg::BoxRegularizer, gradB)
         outB[i]  = lb + pw
         gradB[i] = pw - pw*pw/width  # w * p * (1 - p)
     end
-end
-
-#=
-   Called after the solver, for returning values in the specified box.
-   Same as previous version but excludes updating the gradient.
-=# 
-function regularize!(B, reg::BoxRegularizer)
-    lb    = reg.lowerbound
-    width = reg.upperbound - lb
-    for (i, x) in enumerate(B)
-        B[i] = lb + width / (1.0 + exp(-x))
-    end
+    copyto!(inB, outB)
 end
 
 end
