@@ -3,6 +3,7 @@ module fitpredict
 export fit, predict
 
 using LinearAlgebra
+using Logging
 using Optim
 
 using ..regularization
@@ -28,6 +29,7 @@ function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union
         se     = [sqrt(abs(varcov[i,i])) for i = 1:ntheta]  # abs for negative values very close to 0
         se     = reshape(se, nx, nclasses - 1)
     else
+        @warn "Hessian does not have full rank, therefore standard errors cannot be computed. Check for linearly dependent predictors."
         se = fill(NaN, nx, nclasses - 1)
     end
     (params=B, stderror=se)
