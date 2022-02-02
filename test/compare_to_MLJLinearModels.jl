@@ -71,8 +71,8 @@ Xtrain, Xtest = X1[itrain, :], X1[itest, :]
 # Unregularized fit
 
 # MultinomialRegression
-B  = fit(ytrain, Xtrain).params
-p  = [predict(B, Xtest[i, :]) for i = 1:ntest]
+fitted = fit(ytrain, Xtrain)
+p  = [predict(fitted, Xtest[i, :]) for i = 1:ntest]
 LL = sum(log.([p[i][ytest[i]] for i = 1:ntest]))
 
 # MLJLinearModels
@@ -85,8 +85,8 @@ LL_mlj = sum(log.([p_mlj[i, ytest[i]] for i = 1:ntest]))
 # L1 fit
 
 # MultinomialRegression
-B  = fit(ytrain, Xtrain, L1(0.5)).params
-p  = [predict(B, Xtest[i, :]) for i = 1:ntest]
+fitted = fit(ytrain, Xtrain, L1(0.5))
+p  = [predict(fitted, Xtest[i, :]) for i = 1:ntest]
 LL = sum(log.([p[i][ytest[i]] for i = 1:ntest]))
 
 # MLJLinearModels
@@ -99,8 +99,8 @@ LL_mlj = sum(log.([p_mlj[i, ytest[i]] for i = 1:ntest]))
 # L2 fit
 
 # MultinomialRegression
-B  = fit(ytrain, Xtrain, L2(0.5)).params
-p  = [predict(B, Xtest[i, :]) for i = 1:ntest]
+fitted = fit(ytrain, Xtrain, L2(0.5))
+p  = [predict(fitted, Xtest[i, :]) for i = 1:ntest]
 LL = sum(log.([p[i][ytest[i]] for i = 1:ntest]))
 
 # MLJLinearModels

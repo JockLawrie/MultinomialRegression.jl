@@ -102,9 +102,9 @@ fitted = fit(y, X)
 
 # Assess fitted parameters and standard errors
 target_params   = transpose(reshape(target[:, 2], 4, 6))
-fitted_params   = fitted.params
+fitted_params   = coef(fitted)
 target_stderror = transpose(reshape(target[:, 3], 4, 6))
-fitted_stderror = fitted.stderror
+fitted_stderror = stderror(fitted)
 @test maximum(abs.(fitted_params .- target_params)) <= 0.0001
 @test maximum(abs.(fitted_stderror .- target_stderror)) <= 0.0001
 

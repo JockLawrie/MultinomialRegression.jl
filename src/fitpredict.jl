@@ -1,6 +1,6 @@
 module fitpredict
 
-export fit, predict
+export fit, predict, coef, stderror
 
 using LinearAlgebra
 using Logging
@@ -17,8 +17,8 @@ function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union
     fg!      = get_fg!(reg, probs, y, X)  # Debug with opts = Optim.Options(show_trace=true)
     mdl      = isnothing(opts) ? optimize(Optim.only_fg!(fg!), B0, LBFGS()) : optimize(Optim.only_fg!(fg!), B0, LBFGS(), opts)
     theta    = mdl.minimizer
-    B        = reshape(theta, nx, nclasses - 1)
-    reg isa BoxRegularizer && regularize!(B, reg)  # Constrain B to the box specified by reg
+    coef     = reshape(theta, nx, nclasses - 1)
+    reg isa BoxRegularizer && regularize!(coef, reg)  # Constrain coef to the box specified by reg
 
     # Collect stderror
     f      = TwiceDifferentiable(b -> loglikelihood_for_hessian!(y, X, b), theta; autodiff=:forward)
@@ -32,10 +32,14 @@ function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union
         @warn "Hessian does not have full rank, therefore standard errors cannot be computed. Check for linearly dependent predictors."
         se = fill(NaN, nx, nclasses - 1)
     end
-    (params=B, stderror=se)
+    (coef=coef, stderror=se)
 end
 
-predict(B, x) = update_probs!(fill(0.0, 1 + size(B, 2)), B, x)
+predict(fittedmodel::NamedTuple, x) = predict(coef(fittedmodel), x)
+predict(coef::Matrix, x)            = update_probs!(fill(0.0, 1 + size(coef, 2)), coef, x)
+
+coef(fittedmodel)     = fittedmodel.coef
+stderror(fittedmodel) = fittedmodel.stderror
 
 ################################################################################
 # unexported
