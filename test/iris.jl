@@ -35,14 +35,4 @@ B2     = [0.7888393490091408 -1.8380728113497204; -0.19997312515913346 -1.981765
 @test isapprox(coef(fitted), B2; atol=1e-10)
 @test isregularized(fitted)
 
-# Box regularized fit (constrain each parameter to be with [lowerbound, upperbound])
-fitted = fit(y, X, BoxRegularizer(-5.0, 5.0))
-println("\n", fitted.coef, "\n")
-iris.p = [predict(fitted, X[i, :]) for i = 1:nrow(iris)]
-pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
-B2     = [-0.3456978074212671 -1.0785614563581962; 0.00047621236801109745 -1.4511973966485852; -1.985064931242981 -2.6938946559151047; 2.406338424907733 3.817196871855833; 0.49468727543638824 2.429710014339107]
-@test isapprox(pmean, 0.7456586300743976; atol=1e-10)
-@test isapprox(coef(fitted), B2; atol=1e-10)
-@test isregularized(fitted)
-
 end

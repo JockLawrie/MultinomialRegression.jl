@@ -1,6 +1,8 @@
 module regularization
 
-export regularize, regularize!, AbstractRegularizer, L1, L2, BoxRegularizer
+export AbstractRegularizer, L1, L2, penalty
+
+import LinearAlgebra: norm
 
 abstract type AbstractRegularizer end
 
@@ -16,12 +18,12 @@ struct L1 <: AbstractRegularizer
     end
 end
 
-function regularize(reg::L1, B, gradB)
+function penalty(reg::L1, B, gradB)
     gamma = reg.gamma
     for (i, x) in enumerate(B)
         gradB[i] = x < 0 ? -gamma : gamma
     end
-    gamma * sum(abs(x) for x in B)
+    gamma * norm(B, 1)
 end
 
 ################################################################################
@@ -36,36 +38,10 @@ struct L2 <: AbstractRegularizer
     end
 end
 
-function regularize(reg::L2, B, gradB)
+function penalty(reg::L2, B, gradB)
     lambda = reg.lambda
     gradB .= lambda .* B
-    0.5 * lambda * sum(x^2 for x in B)
-end
-
-################################################################################
-# BoxRegularizer
-
-"Constrains each parameter in B to be in [lowerbound, upperbound]."
-struct BoxRegularizer <: AbstractRegularizer
-    lowerbound::Float64
-    upperbound::Float64
-
-    function BoxRegularizer(lb, ub)
-        lb >= ub && error("The lower bound must be strictly lower than the upper bound.")
-        new(lb, ub)
-    end
-end
-
-"Modifed: outB, inB, gradB"
-function regularize!(outB, inB, reg::BoxRegularizer, gradB)
-    lb    = reg.lowerbound
-    width = reg.upperbound - lb
-    for (i, x) in enumerate(inB)
-        pw       = width / (1.0 + exp(-x))  # p*w, where p = 1/(1+exp(-x))
-        outB[i]  = lb + pw
-        gradB[i] = pw - pw*pw/width  # w * p * (1 - p)
-    end
-    copyto!(inB, outB)
+    0.5 * lambda * norm(B, 2)^2
 end
 
 end

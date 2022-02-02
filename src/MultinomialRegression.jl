@@ -1,6 +1,6 @@
 module MultinomialRegression
 
-export FittedMultinomialRegression, fit, predict, coef, stderror, L1, L2, BoxRegularizer, isregularized
+export FittedMultinomialRegression, fit, predict, coef, stderror, L1, L2, isregularized
 
 include("regularization.jl")
 include("fitpredict.jl")

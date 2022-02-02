@@ -31,25 +31,33 @@ function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union
     B0       = fill(0.0, nx * (nclasses - 1))
     fg!      = get_fg!(reg, probs, y, X)
     mdl      = isnothing(opts) ? optimize(Optim.only_fg!(fg!), B0, LBFGS()) : optimize(Optim.only_fg!(fg!), B0, LBFGS(), opts)
+    theta    = mdl.minimizer
 
     # Construct result
-    theta   = mdl.minimizer
-    loss    = mdl.minimum
     coef    = reshape(theta, nx, nclasses - 1)
-    LL      = isnothing(reg) ? -loss : loglikelihood!(y, X, theta)
-    f       = TwiceDifferentiable(b -> loglikelihood!(y, X, b), theta; autodiff=:forward)
-    hess    = Optim.hessian!(f, theta)
-    ntheta  = length(theta)  # ntheta == nx * (nclasses - 1)
-    if rank(hess) == ntheta
-        vcov = inv(-hess)   # varcov(theta) = inv(FisherInformation) = inv(-Hessian)
-        se   = [sqrt(abs(vcov[i,i])) for i = 1:ntheta]  # abs for negative values very close to 0
-        se   = reshape(se, nx, nclasses - 1)
+    nobs    = length(y)
+    dof     = length(theta)
+    loss    = mdl.minimum
+    if isnothing(reg)  # coef is the maximum-likelihood estimate
+        LL   = -loss
+        f    = TwiceDifferentiable(b -> loglikelihood!(y, X, b), theta; autodiff=:forward)
+        hess = Optim.hessian!(f, theta)
+        if rank(hess) == dof
+            vcov = inv(-hess)   # varcov(theta) = inv(FisherInformation) = inv(-Hessian)
+            se   = [sqrt(abs(vcov[i,i])) for i = 1:dof]  # abs for negative values very close to 0
+            se   = reshape(se, nx, nclasses - 1)
+        else
+            @warn "Hessian does not have full rank, therefore standard errors cannot be computed. Check for linearly dependent predictors."
+            vcov = fill(NaN, dof, dof)
+            se   = fill(NaN, nx, nclasses - 1)
+        end
     else
-        @warn "Hessian does not have full rank, therefore standard errors cannot be computed. Check for linearly dependent predictors."
-        vcov = fill(NaN, ntheta, ntheta)
+        @warn "The parameter covariance matrix and standard errors are not available for regularized regression."
+        vcov = fill(NaN, dof, dof)
         se   = fill(NaN, nx, nclasses - 1)
+        LL   = loglikelihood!(y, X, theta)
     end
-    FittedMultinomialRegression(coef, vcov, se, length(y), ntheta, LL, loss)
+    FittedMultinomialRegression(coef, vcov, se, nobs, dof, LL, loss)
 end
 
 predict(fitted::FittedMultinomialRegression, x) = predict(coef(fitted), x)
@@ -85,23 +93,12 @@ end
 # unexported
 
 # L1 or L2 regularization
-get_fg!(reg, probs, y, X) = (_, gradB, B) -> regularize(reg, B, gradB) - loglikelihood!(probs, gradB, y, X, B)
+get_fg!(reg, probs, y, X) = (_, gradB, B) -> penalty(reg, B, gradB) - loglikelihood!(probs, gradB, y, X, B)
 
 # No regularization
 function get_fg!(reg::Nothing, probs, y, X)
     (_, gradB, B) -> begin
         fill!(gradB, 0.0)
-        -loglikelihood!(probs, gradB, y, X, B)
-    end
-end
-
-# Box regularization
-function get_fg!(reg::BoxRegularizer, probs, y, X)
-    nx       = size(X, 2)
-    nclasses = length(probs)
-    outB     = fill(0.0, nx * (nclasses - 1))
-    (_, gradB, B) -> begin
-        regularize!(outB, B, reg, gradB)
         -loglikelihood!(probs, gradB, y, X, B)
     end
 end
