@@ -1,6 +1,6 @@
 module regularization
 
-export AbstractRegularizer, L1, L2, penalty
+export AbstractRegularizer, L1, L2, penalty, penalty_gradient!
 
 import LinearAlgebra: norm
 
@@ -18,12 +18,14 @@ struct L1 <: AbstractRegularizer
     end
 end
 
-function penalty(reg::L1, B, gradB)
+penalty(reg::L1, B) = reg.gamma * norm(B, 1)
+
+function penalty_gradient!(gradB, reg::L1, B)
     gamma = reg.gamma
     for (i, x) in enumerate(B)
-        gradB[i] = x < 0 ? -gamma : gamma
+        gradB[i] += x < 0 ? -gamma : gamma
     end
-    gamma * norm(B, 1)
+    nothing
 end
 
 ################################################################################
@@ -38,10 +40,16 @@ struct L2 <: AbstractRegularizer
     end
 end
 
-function penalty(reg::L2, B, gradB)
-    lambda = reg.lambda
-    gradB .= lambda .* B
-    0.5 * lambda * norm(B, 2)^2
+function penalty(reg::L2, B)
+    lambda  = reg.lambda
+    B_2norm = norm(B, 2)
+    0.5 * lambda * B_2norm * B_2norm
+end
+
+function penalty_gradient!(gradB, reg::L2, B)
+    lambda  = reg.lambda
+    gradB .+= lambda .* B
+    nothing
 end
 
 end

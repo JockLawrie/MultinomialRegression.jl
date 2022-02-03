@@ -38,9 +38,9 @@ function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union
     nobs    = length(y)
     dof     = length(theta)
     loss    = mdl.minimum
-    if isnothing(reg)  # coef is the maximum-likelihood estimate
+    if isnothing(reg)  # Unregularized model => coef is the maximum-likelihood estimate
         LL   = -loss
-        f    = TwiceDifferentiable(b -> loglikelihood!(y, X, b), theta; autodiff=:forward)
+        f    = TwiceDifferentiable(b -> loglikelihood(y, X, b), theta; autodiff=:forward)
         hess = Optim.hessian!(f, theta)
         if rank(hess) == dof
             vcov = inv(-hess)   # varcov(theta) = inv(FisherInformation) = inv(-Hessian)
@@ -55,7 +55,7 @@ function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union
         @warn "The parameter covariance matrix and standard errors are not available for regularized regression."
         vcov = fill(NaN, dof, dof)
         se   = fill(NaN, nx, nclasses - 1)
-        LL   = loglikelihood!(y, X, theta)
+        LL   = penalty(reg, theta) - loss  # loss = -LL + penalty
     end
     FittedMultinomialRegression(coef, vcov, se, nobs, dof, LL, loss)
 end
@@ -92,21 +92,31 @@ end
 ################################################################################
 # unexported
 
-# L1 or L2 regularization
-get_fg!(reg, probs, y, X) = (_, gradB, B) -> penalty(reg, B, gradB) - loglikelihood!(probs, gradB, y, X, B)
-
 # No regularization
-function get_fg!(reg::Nothing, probs, y, X)
-    (_, gradB, B) -> begin
-        fill!(gradB, 0.0)
-        -loglikelihood!(probs, gradB, y, X, B)
+get_fg!(reg::Nothing, probs, y, X) = (_, gradb, b) -> -loglikelihood!(probs, gradb, y, X, b)
+
+# L1 or L2 regularization
+function get_fg!(reg, probs, y, X)
+    (_, gradb, b) -> begin
+        loss = -loglikelihood!(probs, gradb, y, X, b) + penalty(reg, b)
+        penalty_gradient!(gradb, reg, b)
+        loss
     end
 end
 
-function loglikelihood!(probs, gradb::Vector, y, X, b::Vector)
+function loglikelihood(y, X, b::AbstractVector{T}) where T
+    nx       = size(X, 2)
+    nclasses = Int(length(b) / nx) + 1
+    probs    = zeros(T, nclasses)             # Accommodates ForwardDiff.Dual
+    gradb    = zeros(T, nx * (nclasses - 1))  # Accommodates ForwardDiff.Dual
+    loglikelihood!(probs, gradb, y, X, b)
+end
+
+function loglikelihood!(probs, gradb, y, X, b)
+    fill!(gradb, 0.0)
     LL    = 0.0
     nx    = size(X, 2)
-    nj    = Int(length(b) / nx)
+    nj    = Int(length(b) / nx)  # nclasses - 1
     B     = reshape(b, nx, nj)
     gradB = reshape(gradb, nx, nj)
     for (i, yi) in enumerate(y)
@@ -145,21 +155,6 @@ function update_gradient!(gradB, probs, yi, x)
         gradB[j, yi - 1] -= xj  # Negative gradient because function is to be minimized
     end
     nothing
-end
-
-"Called only for calculating the loglikelihood and the Hessian after optimization"
-function loglikelihood!(y, X, b::AbstractVector{T}) where T
-    LL    = 0.0
-    nx    = size(X, 2)
-    nj    = Int(length(b) / nx)
-    B     = reshape(b, nx, nj)
-    probs = zeros(T, 1 + nj)  # Must accommodate ForwardDiff.Dual
-    for (i, yi) in enumerate(y)
-        x = view(X, i, :)
-        update_probs!(probs, B, x)
-        LL += log(max(probs[yi], 1e-12))
-    end
-    LL
 end
 
 end
