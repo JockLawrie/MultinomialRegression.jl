@@ -3,9 +3,11 @@ module MultinomialRegression
 export FittedMultinomialRegression, fit, predict, coef, stderror, L1, L2, isregularized
 
 include("regularization.jl")
+include("ptables.jl")
 include("fitpredict.jl")
 
 using .regularization  # Independent
-using .fitpredict      # Depends on: regularization
+using .ptables         # Independent
+using .fitpredict      # Depends on: regularization, ptables
 
 end

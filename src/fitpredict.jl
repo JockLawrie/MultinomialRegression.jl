@@ -1,19 +1,23 @@
 module fitpredict
 
-export FittedMultinomialRegression, fit, predict, coef, stderror, isregularized
+export MultinomialRegressionModel, fit, predict,           # Construct and use model
+       nparams, coef, stderror, coeftable, coefcor, vcov,  # Coefficient diagnostics
+       nobs, loglikelihood, isregularized, aic, aicc, bic  # Model diagnostics
 
 using LinearAlgebra
 using Logging
 using Optim
 
 using ..regularization
+using ..ptables
 
-struct FittedMultinomialRegression
+struct MultinomialRegressionModel
+    yname::String
+    ylevels::Vector{String}
+    xnames::Vector{String}
     coef::Matrix{Float64}
     vcov::Matrix{Float64}
-    stderror::Matrix{Float64}
     nobs::Int
-    dof::Int  # The number of fitted parameters (the dimension of the optimization problem)
     loglikelihood::Float64
     loss::Float64
 end
@@ -21,9 +25,10 @@ end
 """
 Assumptions:
 1. y has categories numbered 1 to nclasses.
-2. The reference category is the category numbered 1.
+2. The first category is the reference category.
 """
-function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, Optim.Options}=nothing)
+function fit(y, X, yname::String, ylevels::Vector{String}, xnames::Vector{String},
+             reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, Optim.Options}=nothing)
     # Fit
     nclasses = maximum(y)
     nx       = size(X, 2)
@@ -36,61 +41,89 @@ function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union
     # Construct result
     coef    = reshape(theta, nx, nclasses - 1)
     nobs    = length(y)
-    dof     = length(theta)
+    nparams = length(theta)
     loss    = mdl.minimum
+    ylvls   = length(ylevels) == nclasses - 1 ? ylevels : ylevels[2:end]
     if isnothing(reg)  # Unregularized model => coef is the maximum-likelihood estimate
         LL   = -loss
         f    = TwiceDifferentiable(b -> loglikelihood(y, X, b), theta; autodiff=:forward)
         hess = Optim.hessian!(f, theta)
-        if rank(hess) == dof
+        if rank(hess) == nparams
             vcov = inv(-hess)   # varcov(theta) = inv(FisherInformation) = inv(-Hessian)
-            se   = [sqrt(abs(vcov[i,i])) for i = 1:dof]  # abs for negative values very close to 0
+            se   = [sqrt(abs(vcov[i,i])) for i = 1:nparams]  # abs for negative values very close to 0
             se   = reshape(se, nx, nclasses - 1)
         else
             @warn "Hessian does not have full rank, therefore standard errors cannot be computed. Check for linearly dependent predictors."
-            vcov = fill(NaN, dof, dof)
+            vcov = fill(NaN, nparams, nparams)
             se   = fill(NaN, nx, nclasses - 1)
         end
     else
         @warn "The parameter covariance matrix and standard errors are not available for regularized regression."
-        vcov = fill(NaN, dof, dof)
+        vcov = fill(NaN, nparams, nparams)
         se   = fill(NaN, nx, nclasses - 1)
         LL   = penalty(reg, theta) - loss  # loss = -LL + penalty
     end
-    FittedMultinomialRegression(coef, vcov, se, nobs, dof, LL, loss)
+    MultinomialRegressionModel(yname, ylvls, xnames, coef, vcov, nobs, LL, loss)
 end
 
-predict(fitted::FittedMultinomialRegression, x) = predict(coef(fitted), x)
-predict(coef::Matrix, x) = update_probs!(fill(0.0, 1 + size(coef, 2)), coef, x)
-
-coef(fitted::FittedMultinomialRegression)     = fitted.coef
-dof(fitted::FittedMultinomialRegression)      = fitted.dof
-stderror(fitted::FittedMultinomialRegression) = fitted.stderror
-vcov(fitted::FittedMultinomialRegression)     = fitted.vcov
-nobs(fitted::FittedMultinomialRegression)     = fitted.nobs
-loglikelihood(fitted::FittedMultinomialRegression) = fitted.loglikelihood
-isregularized(fitted::FittedMultinomialRegression) = fitted.loss != -fitted.loglikelihood  # If not regularized, then loss == -LL
-
-function aic(fitted::FittedMultinomialRegression)
-    isregularized(fitted) && @warn "Model is regularized. AIC is not based on MLE."
-    2.0 * (dof(fitted) - loglikelihood(fitted))
+function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, Optim.Options}=nothing)
+    yname   = "y"
+    ylevels = ["y$(i)" for i = 1:maximum(y)]
+    xnames  = ["x$(i)" for i = 1:size(X, 2)]
+    fit(y, X, yname, ylevels, xnames, reg, opts)
 end
 
-function aicc(fitted::FittedMultinomialRegression)
-    LL = loglikelihood(fitted)
-    k  = dof(fitted)
-    n  = nobs(fitted)
-    isregularized(fitted) && @warn "Model is regularized. AICc is not based on MLE."
+predict(m::MultinomialRegressionModel, x) = predict(m.coef, x)
+predict(b::Matrix, x) = update_probs!(fill(0.0, 1 + size(b, 2)), b, x)
+
+nparams(m::MultinomialRegressionModel)       = length(m.coef)
+vcov(m::MultinomialRegressionModel)          = m.vcov
+nobs(m::MultinomialRegressionModel)          = m.nobs
+loglikelihood(m::MultinomialRegressionModel) = m.loglikelihood
+isregularized(m::MultinomialRegressionModel) = m.loss != -m.loglikelihood  # If not regularized, then loss == -LL
+
+function coef(m::MultinomialRegressionModel)
+    data          = m.coef
+    colnames      = m.ylevels
+    rownames      = m.xnames
+    header        = (vcat(m.yname, ["" for j = 1:(length(m.ylevels) - 1)]), colnames)
+    colname2index = Dict(colname => j for (j, colname) in enumerate(colnames))
+    rowname2index = Dict(rowname => i for (i, rowname) in enumerate(rownames))
+    PTable(data, header, rownames, colname2index, rowname2index)
+end
+
+function stderror(m::MultinomialRegressionModel)
+    [sqrt(abs(m.vcov[i,i])) for i = 1:nparams(m)]
+end
+
+function coeftable(m::MultinomialRegressionModel)
+    m.coef
+end
+
+function coefcor(m::MultinomialRegressionModel)
+    m.coef
+end
+
+function aic(m::MultinomialRegressionModel)
+    isregularized(m) && @warn "Model is regularized. AIC is not based on MLE."
+    2.0 * (nparams(m) - loglikelihood(m))
+end
+
+function aicc(m::MultinomialRegressionModel)
+    LL = loglikelihood(m)
+    k  = nparams(m)
+    n  = nobs(m)
+    isregularized(m) && @warn "Model is regularized. AICc is not based on MLE."
     2.0*(k - LL) + 2.0*k*(k - 1.0)/(n - k - 1.0)
 end
 
-function bic(fitted::FittedMultinomialRegression)
-    isregularized(fitted) && @warn "Model is regularized. BIC is not based on MLE."
-    -2.0*loglikelihood(fitted) + dof(fitted)*log(nobs(fitted))
+function bic(m::MultinomialRegressionModel)
+    isregularized(m) && @warn "Model is regularized. BIC is not based on MLE."
+    -2.0*loglikelihood(m) + nparams(m)*log(nobs(m))
 end
 
 ################################################################################
-# unexported
+# Unexported
 
 # No regularization
 get_fg!(reg::Nothing, probs, y, X) = (_, gradb, b) -> -loglikelihood!(probs, gradb, y, X, b)
