@@ -1,12 +1,14 @@
 module fitpredict
 
-export MultinomialRegressionModel, fit, predict,           # Construct and use model
+export MultinomialRegressionModel, fit, predict, L1, L2,   # Construct and use model
        nparams, coef, stderror, coeftable, coefcor, vcov,  # Coefficient diagnostics
-       nobs, loglikelihood, isregularized, aic, aicc, bic  # Model diagnostics
+       isregularized, nobs, loglikelihood, aic, aicc, bic  # Model diagnostics
 
+using Distributions
 using LinearAlgebra
 using Logging
 using Optim
+using StatsBase
 
 using ..regularization
 using ..ptables
@@ -50,17 +52,13 @@ function fit(y, X, yname::String, ylevels::Vector{String}, xnames::Vector{String
         hess = Optim.hessian!(f, theta)
         if rank(hess) == nparams
             vcov = inv(-hess)   # varcov(theta) = inv(FisherInformation) = inv(-Hessian)
-            se   = [sqrt(abs(vcov[i,i])) for i = 1:nparams]  # abs for negative values very close to 0
-            se   = reshape(se, nx, nclasses - 1)
         else
             @warn "Hessian does not have full rank, therefore standard errors cannot be computed. Check for linearly dependent predictors."
             vcov = fill(NaN, nparams, nparams)
-            se   = fill(NaN, nx, nclasses - 1)
         end
     else
         @warn "The parameter covariance matrix and standard errors are not available for regularized regression."
         vcov = fill(NaN, nparams, nparams)
-        se   = fill(NaN, nx, nclasses - 1)
         LL   = penalty(reg, theta) - loss  # loss = -LL + penalty
     end
     MultinomialRegressionModel(yname, ylvls, xnames, coef, vcov, nobs, LL, loss)
@@ -77,31 +75,57 @@ predict(m::MultinomialRegressionModel, x) = predict(m.coef, x)
 predict(b::Matrix, x) = update_probs!(fill(0.0, 1 + size(b, 2)), b, x)
 
 nparams(m::MultinomialRegressionModel)       = length(m.coef)
-vcov(m::MultinomialRegressionModel)          = m.vcov
 nobs(m::MultinomialRegressionModel)          = m.nobs
 loglikelihood(m::MultinomialRegressionModel) = m.loglikelihood
 isregularized(m::MultinomialRegressionModel) = m.loss != -m.loglikelihood  # If not regularized, then loss == -LL
 
 function coef(m::MultinomialRegressionModel)
-    data          = m.coef
-    colnames      = m.ylevels
-    rownames      = m.xnames
-    header        = (vcat(m.yname, ["" for j = 1:(length(m.ylevels) - 1)]), colnames)
-    colname2index = Dict(colname => j for (j, colname) in enumerate(colnames))
-    rowname2index = Dict(rowname => i for (i, rowname) in enumerate(rownames))
-    PTable(data, header, rownames, colname2index, rowname2index)
+    data     = m.coef
+    colnames = m.ylevels
+    rownames = m.xnames
+    header   = (vcat(m.yname, ["" for j = 1:(length(m.ylevels) - 1)]), colnames)
+    PTable(data, header, rownames, colnames)
 end
 
 function stderror(m::MultinomialRegressionModel)
-    [sqrt(abs(m.vcov[i,i])) for i = 1:nparams(m)]
+    se       = [sqrt(abs(m.vcov[i,i])) for i = 1:nparams(m)]
+    data     = reshape(se, size(m.coef))
+    colnames = m.ylevels
+    rownames = m.xnames
+    header   = (vcat(m.yname, ["" for j = 1:(length(m.ylevels) - 1)]), colnames)
+    PTable(data, header, rownames, colnames)
 end
 
-function coeftable(m::MultinomialRegressionModel)
-    m.coef
+function coeftable(m::MultinomialRegressionModel, ci_level::Float64=0.95)
+    levstr   = isinteger(ci_level*100) ? string(Integer(ci_level*100)) : string(ci_level*100)
+    ni       = nparams(m)
+    b        = reshape(m.coef, ni)
+    se       = [sqrt(abs(m.vcov[i,i])) for i = 1:ni]
+    z        = b ./ se
+    pvals    = 2 * ccdf.(Ref(Normal()), abs.(z))
+    ci_width = -se * quantile(Normal(), (1-ci_level)/2)
+    data     = hcat(b, se, z, pvals, b-ci_width, b+ci_width)
+    colnames = ["Coef", "StdError", "z", "Pr(>|z|)", "Lower $levstr%", "Upper $levstr%"]
+    rownames = construct_vcov_rownames(m, true)
+    header   = colnames
+    PTable(data, header, rownames, colnames)
+end
+
+function vcov(m::MultinomialRegressionModel)
+    data     = m.vcov
+    colnames = construct_vcov_rownames(m, false)
+    rownames = construct_vcov_rownames(m, true)
+    header   = colnames
+    PTable(data, header, rownames, colnames)
 end
 
 function coefcor(m::MultinomialRegressionModel)
-    m.coef
+    se       = [sqrt(abs(m.vcov[i,i])) for i = 1:nparams(m)]
+    data     = StatsBase.cov2cor(m.vcov, se)
+    colnames = construct_vcov_rownames(m, false)
+    rownames = construct_vcov_rownames(m, true)
+    header   = colnames
+    PTable(data, header, rownames, colnames)
 end
 
 function aic(m::MultinomialRegressionModel)
@@ -124,6 +148,18 @@ end
 
 ################################################################################
 # Unexported
+
+function construct_vcov_rownames(m::MultinomialRegressionModel, align_vertically::Bool)
+    if align_vertically  # Suitable for row names
+        ylevel_maxlen  = maximum(length.(m.ylevels)) + 4  # +2 for "y=_  "
+        ylevels_padded = rpad.(["y=$(ylevel)  " for ylevel in m.ylevels], ylevel_maxlen)
+        xname_maxlen   = maximum(length.(m.xnames)) + 2   # +2 for "x="
+        xnames_padded  = rpad.(["x=$(xname)" for xname in m.xnames], xname_maxlen)
+        reshape(["$(ylevel)$(xname)" for xname in xnames_padded, ylevel in ylevels_padded], nparams(m))
+    else                 # Suitable for column names
+        reshape(["y=$(ylevel)  x=$(xname)" for xname in m.xnames, ylevel in m.ylevels], nparams(m))
+    end
+end
 
 # No regularization
 get_fg!(reg::Nothing, probs, y, X) = (_, gradb, b) -> -loglikelihood!(probs, gradb, y, X, b)

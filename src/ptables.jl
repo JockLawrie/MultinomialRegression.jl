@@ -23,6 +23,12 @@ struct PTable{D, H, R}
     rowname2index::Dict{R, Int}  # primarykey => i. Tuple key type allows for multi-column primary keys.
 end
 
+function PTable(data, header, rownames, colnames)
+    colname2index = Dict(colname => j for (j, colname) in enumerate(colnames))
+    rowname2index = Dict(rowname => i for (i, rowname) in enumerate(rownames))
+    PTable(data, header, rownames, colname2index, rowname2index)
+end
+
 show(io::IO, table::PTable) = pretty_table(table.data, header=table.header, row_names=table.rownames)
 
 getindex(table::PTable, i, j)           = table.data[table.rowname2index[i], table.colname2index[j]]

@@ -4,10 +4,12 @@ authors = ["jocklawrie <jock.lawrie@gmail.com>"]
 version = "0.2.1"
 
 [deps]
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 PrettyTables = "08abe8d2-0d0c-5749-adfa-8a2ac140af0d"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
 Optim = "1"
