@@ -4,14 +4,16 @@ export MultinomialRegressionModel, fit, predict, L1, L2,   # Construct and use m
        nparams, coef, stderror, coeftable, coefcor, vcov,  # Coefficient diagnostics
        isregularized, nobs, loglikelihood, aic, aicc, bic  # Model diagnostics
 
+using AxisArrays
 using Distributions
 using LinearAlgebra
 using Logging
 using Optim
+using PrettyTables
 using StatsBase
+import Base: show  # Overload for 1D and 2D AxisArrays
 
 using ..regularization
-using ..ptables
 
 struct MultinomialRegressionModel
     yname::String
@@ -79,21 +81,12 @@ nobs(m::MultinomialRegressionModel)          = m.nobs
 loglikelihood(m::MultinomialRegressionModel) = m.loglikelihood
 isregularized(m::MultinomialRegressionModel) = m.loss != -m.loglikelihood  # If not regularized, then loss == -LL
 
-function coef(m::MultinomialRegressionModel)
-    data     = m.coef
-    colnames = m.ylevels
-    rownames = m.xnames
-    header   = (vcat(m.yname, ["" for j = 1:(length(m.ylevels) - 1)]), colnames)
-    PTable(data, header, rownames, colnames)
-end
+coef(m::MultinomialRegressionModel) = AxisArray(m.coef, rownames=m.xnames, colnames=m.ylevels)
 
 function stderror(m::MultinomialRegressionModel)
-    se       = [sqrt(abs(m.vcov[i,i])) for i = 1:nparams(m)]
-    data     = reshape(se, size(m.coef))
-    colnames = m.ylevels
-    rownames = m.xnames
-    header   = (vcat(m.yname, ["" for j = 1:(length(m.ylevels) - 1)]), colnames)
-    PTable(data, header, rownames, colnames)
+    se   = [sqrt(abs(m.vcov[i,i])) for i = 1:nparams(m)]
+    data = reshape(se, size(m.coef))
+    AxisArray(data, rownames=m.xnames, colnames=m.ylevels)
 end
 
 function coeftable(m::MultinomialRegressionModel, ci_level::Float64=0.95)
@@ -107,16 +100,13 @@ function coeftable(m::MultinomialRegressionModel, ci_level::Float64=0.95)
     data     = hcat(b, se, z, pvals, b-ci_width, b+ci_width)
     colnames = ["Coef", "StdError", "z", "Pr(>|z|)", "Lower $levstr%", "Upper $levstr%"]
     rownames = construct_vcov_rownames(m, true)
-    header   = colnames
-    PTable(data, header, rownames, colnames)
+    AxisArray(data, rownames=rownames, colnames=colnames)
 end
 
 function vcov(m::MultinomialRegressionModel)
-    data     = m.vcov
     colnames = construct_vcov_rownames(m, false)
     rownames = construct_vcov_rownames(m, true)
-    header   = colnames
-    PTable(data, header, rownames, colnames)
+    AxisArray(m.vcov, rownames=rownames, colnames=colnames)
 end
 
 function coefcor(m::MultinomialRegressionModel)
@@ -124,8 +114,7 @@ function coefcor(m::MultinomialRegressionModel)
     data     = StatsBase.cov2cor(m.vcov, se)
     colnames = construct_vcov_rownames(m, false)
     rownames = construct_vcov_rownames(m, true)
-    header   = colnames
-    PTable(data, header, rownames, colnames)
+    AxisArray(data, rownames=rownames, colnames=colnames)
 end
 
 function aic(m::MultinomialRegressionModel)
@@ -159,6 +148,14 @@ function construct_vcov_rownames(m::MultinomialRegressionModel, align_vertically
     else                 # Suitable for column names
         reshape(["y=$(ylevel)  x=$(xname)" for xname in m.xnames, ylevel in m.ylevels], nparams(m))
     end
+end
+
+function Base.show(io::IO, ::MIME"text/plain", table::AxisArray{T,1,D,Tuple{A}}) where {T,D,A}
+    pretty_table(table.data, header=[""], row_names=collect(table.axes[1].val))
+end
+
+function Base.show(io::IO, ::MIME"text/plain", table::AxisArray{T,2,D,Tuple{A1,A2}}) where {T,D,A1,A2}
+    pretty_table(table.data, header=collect(table.axes[2].val), row_names=collect(table.axes[1].val))
 end
 
 # No regularization

@@ -5,11 +5,9 @@ export MultinomialRegressionModel, fit, predict, L1, L2,   # Construct and use m
        isregularized, nobs, loglikelihood, aic, aicc, bic  # Model diagnostics
 
 include("regularization.jl")
-include("ptables.jl")
 include("fitpredict.jl")
 
 using .regularization  # Independent
-using .ptables         # Independent
 using .fitpredict      # Depends on: regularization, ptables
 
 end

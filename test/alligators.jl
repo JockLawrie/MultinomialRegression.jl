@@ -93,18 +93,21 @@ data.oklawaha  = [x == "oklawaha" ? 1.0 : 0.0 for x in data.Lake]
 data.trafford  = [x == "trafford" ? 1.0 : 0.0 for x in data.Lake]
 
 # Construct training data
-ylevels_new = Dict("Fish" => 1, "Bird" => 2, "Invertebrate" => 3, "Reptile" => 4, "Other" => 5)
-y = [ylevels_new[x] for x in data.StomachContents]
-X = Matrix(data[:, ["intercept", "george", "oklawaha", "trafford", "large", "male"]])
+yname   = "StomachContents"
+ylevels = ["Fish", "Bird", "Invertebrate", "Reptile", "Other"]
+xnames  = ["intercept", "george", "oklawaha", "trafford", "large", "male"]
+ylevels_dict = Dict(ylevel => i for (i, ylevel) in enumerate(ylevels))
+y = [ylevels_dict[x] for x in data.StomachContents]
+X = Matrix(data[:, xnames])
 
 # Train
-fitted = fit(y, X)
+model = fit(y, X, yname, ylevels, xnames)
 
 # Assess fitted parameters and standard errors
 target_params   = transpose(reshape(target[:, 2], 4, 6))
-fitted_params   = coef(fitted)
+fitted_params   = coef(model)
 target_stderror = transpose(reshape(target[:, 3], 4, 6))
-fitted_stderror = stderror(fitted)
+fitted_stderror = stderror(model)
 @test maximum(abs.(fitted_params .- target_params)) <= 0.0001
 @test maximum(abs.(fitted_stderror .- target_stderror)) <= 0.0001
 
