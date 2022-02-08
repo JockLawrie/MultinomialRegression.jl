@@ -43,25 +43,24 @@ function fit(y, X, yname::String, ylevels::Vector{String}, xnames::Vector{String
     theta    = mdl.minimizer
 
     # Construct result
+    ylvls   = length(ylevels) == nclasses - 1 ? ylevels : ylevels[2:end]
     coef    = reshape(theta, nx, nclasses - 1)
     nobs    = length(y)
-    nparams = length(theta)
     loss    = mdl.minimum
-    ylvls   = length(ylevels) == nclasses - 1 ? ylevels : ylevels[2:end]
-    if isnothing(reg)  # Unregularized model => coef is the maximum-likelihood estimate
-        LL   = -loss
+    LL      = isnothing(reg) ? -loss : penalty(reg, theta) - loss  # loss = -LL + penalty
+    nparams = length(theta)
+    if isapprox(-LL, loss, atol=1e-8)  # Estimated parameters are MLEs or very close too
         f    = TwiceDifferentiable(b -> loglikelihood(y, X, b), theta; autodiff=:forward)
         hess = Optim.hessian!(f, theta)
         if rank(hess) == nparams
             vcov = inv(-hess)   # varcov(theta) = inv(FisherInformation) = inv(-Hessian)
         else
-            @warn "Hessian does not have full rank, therefore standard errors cannot be computed. Check for linearly dependent predictors."
+            @warn "Standard errors cannot be computed (Hessian does not have full rank). Check for linearly dependent predictors."
             vcov = fill(NaN, nparams, nparams)
         end
     else
-        @warn "The parameter covariance matrix and standard errors are not available for regularized regression."
+        @warn "The parameters are not maximum likelihood estimates; covariance matrix and standard errors are not available"
         vcov = fill(NaN, nparams, nparams)
-        LL   = penalty(reg, theta) - loss  # loss = -LL + penalty
     end
     MultinomialRegressionModel(yname, ylvls, xnames, coef, vcov, nobs, LL, loss)
 end
@@ -73,8 +72,7 @@ function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union
     fit(y, X, yname, ylevels, xnames, reg, opts)
 end
 
-predict(m::MultinomialRegressionModel, x) = predict(m.coef, x)
-predict(b::Matrix, x) = update_probs!(fill(0.0, 1 + size(b, 2)), b, x)
+predict(m::MultinomialRegressionModel, x) = update_probs!(fill(0.0, 1 + size(m.coef, 2)), m.coef, x)
 
 nparams(m::MultinomialRegressionModel)       = length(m.coef)
 nobs(m::MultinomialRegressionModel)          = m.nobs
