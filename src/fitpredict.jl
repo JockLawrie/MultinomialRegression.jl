@@ -1,16 +1,18 @@
 module fitpredict
 
-export MultinomialRegressionModel, fit, predict, L1, L2,   # Construct and use model
-       nparams, coef, stderror, coeftable, coefcor, vcov,  # Coefficient diagnostics
-       isregularized, nobs, loglikelihood, aic, aicc, bic  # Model diagnostics
+export MultinomialRegressionModel, @formula, fit, L1, L2, predict,  # Construct and use model
+       nparams, coef, stderror, coeftable, coefcor, vcov,           # Coefficient diagnostics
+       isregularized, nobs, loglikelihood, aic, aicc, bic           # Model diagnostics
 
 using AxisArrays
+using CategoricalArrays
 using Distributions
 using LinearAlgebra
 using Logging
 using Optim
 using PrettyTables
 using StatsBase
+using StatsModels
 import Base: show  # Overload for 1D and 2D AxisArrays
 
 using ..regularization
@@ -24,6 +26,18 @@ struct MultinomialRegressionModel
     nobs::Int
     loglikelihood::Float64
     loss::Float64
+end
+
+function fit(f::FormulaTerm, data, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, Optim.Options}=nothing)
+    yname   = string(f.lhs.sym)
+    ycatvec = data[!, yname] isa CategoricalVector ? data[!, yname] : categorical(data[!, yname])
+    ylevels = levels(ycatvec)
+    y       = ycatvec.refs
+    f       = apply_schema(f, schema(f, data))
+    c       = coefnames(f)  # (names(y), names(x))
+    xnames  = c[2]
+    X       = modelmatrix(f, data)  # Matrix{Float64}
+    fit(y, X, yname, ylevels, xnames, reg, opts)
 end
 
 """
@@ -49,7 +63,7 @@ function fit(y, X, yname::String, ylevels::Vector{String}, xnames::Vector{String
     loss    = mdl.minimum
     LL      = isnothing(reg) ? -loss : penalty(reg, theta) - loss  # loss = -LL + penalty
     nparams = length(theta)
-    if isapprox(-LL, loss, atol=1e-8)  # Estimated parameters are MLEs or very close too
+    if isapprox(-LL, loss, atol=1e-8)  # Estimated parameters are MLEs or very close to
         f    = TwiceDifferentiable(b -> loglikelihood(y, X, b), theta; autodiff=:forward)
         hess = Optim.hessian!(f, theta)
         if rank(hess) == nparams
@@ -59,17 +73,10 @@ function fit(y, X, yname::String, ylevels::Vector{String}, xnames::Vector{String
             vcov = fill(NaN, nparams, nparams)
         end
     else
-        @warn "The parameters are not maximum likelihood estimates; covariance matrix and standard errors are not available"
+        @warn "The covariance matrix and standard errors are not available because the parameters are not maximum likelihood estimates"
         vcov = fill(NaN, nparams, nparams)
     end
     MultinomialRegressionModel(yname, ylvls, xnames, coef, vcov, nobs, LL, loss)
-end
-
-function fit(y, X, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, Optim.Options}=nothing)
-    yname   = "y"
-    ylevels = ["y$(i)" for i = 1:maximum(y)]
-    xnames  = ["x$(i)" for i = 1:size(X, 2)]
-    fit(y, X, yname, ylevels, xnames, reg, opts)
 end
 
 predict(m::MultinomialRegressionModel, x) = update_probs!(fill(0.0, 1 + size(m.coef, 2)), m.coef, x)

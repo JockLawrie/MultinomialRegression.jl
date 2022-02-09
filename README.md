@@ -1,22 +1,19 @@
 # MultinomialRegression.jl
 
 ```julia
-using DataFrames
 using MultinomialRegression
+using DataFrames
 using RDatasets
-using Statistics
 
 # Data
 iris = dataset("datasets", "iris")
-iris.intercept = fill(1.0, nrow(iris))
-yname   = "Species"
-ylevels = levels(iris.Species)
-xnames  = ["intercept", "SepalWidth"]
-y = iris.Species.refs
-X = Matrix(iris[:, xnames])
 
 # Unregularized fit
-model = fit(y, X, yname, ylevels, xnames)  # fit(y, X) works too
+model = fit(@formula(Species ~ 1 + SepalWidth), iris)
+
+# Predict
+xnew = [1.0, iris.SepalWidth[1]]
+pred = predict(model, xnew)
 
 # Model-level diagnostics
 isregularized(model)
@@ -36,8 +33,8 @@ coefcor(model)
 
 # Get values using row names and column names
 B = coef(model)
-B["intercept", "virginica"]
-B["intercept", :]
+B["(Intercept)", "virginica"]
+B["(Intercept)", :]
 B[:, "virginica"]
 B[1, 2]  # Integer indices also work
 
@@ -47,8 +44,8 @@ isapprox(B, B2; atol=1e-10)  # Reproducible result
 #=
   Regularized fit
   Note: Standard errors not yet available because the current method requires that the 
-        parameters are maximum likelihood estimates, which regularized parameters are usually not.
+        parameters are maximum likelihood estimates, which regularized parameters usually aren't.
 =#
-model_L1 = fit(y, X, yname, ylevels, xnames, L1(0.5))
-model_L2 = fit(y, X, yname, ylevels, xnames, L2(0.5))
+model_L1 = fit(@formula(Species ~ 1 + SepalWidth), iris, L1(0.5))
+model_L2 = fit(@formula(Species ~ 1 + SepalWidth), iris, L2(0.5))
 ```
