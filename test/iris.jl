@@ -17,6 +17,29 @@ B2     = [15.619498241390401 -27.018305571964458; -9.379861599935365 -11.8450817
 @test isapprox(coef(model), B2; atol=1e-10)
 @test !isregularized(model)
 
+# Model-level diagnostics
+isregularized(model)
+nobs(model)
+loglikelihood(model)
+aic(model)
+aicc(model)
+bic(model)
+
+# Coefficient-level diagnostics
+nparams(model)
+coef(model)
+stderror(model)
+coeftable(model)
+vcov(model)
+coefcor(model)
+
+# Access values
+B = coef(model)
+B["(Intercept)", "virginica"]
+B["(Intercept)", :]
+B[:, "virginica"]
+B[1, 2]
+
 # L1 regularized fit
 model  = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris, L1(0.5))
 iris.p = [predict(model, X[i, :]) for i = 1:nrow(iris)]
