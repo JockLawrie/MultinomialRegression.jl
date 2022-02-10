@@ -1,20 +1,12 @@
 module fitpredict
 
-export MultinomialRegressionModel, @formula, fit, L1, L2, predict,  # Construct and use model
-       nparams, coef, stderror, coeftable, coefcor, vcov,           # Coefficient diagnostics
-       isregularized, nobs, loglikelihood, aic, aicc, bic           # Model diagnostics
+export MultinomialRegressionModel, @formula, fit, L1, L2, predict
 
-using AxisArrays
 using CategoricalArrays
-using Distributions
 using LinearAlgebra
 using Logging
 using Optim
-using PrettyTables
-using StatsBase
 using StatsModels
-import Base: show  # Overload for 1D and 2D AxisArrays
-
 using ..regularization
 
 struct MultinomialRegressionModel
@@ -48,7 +40,7 @@ Assumptions:
 function fit(y, X, yname::String, ylevels::Vector{String}, xnames::Vector{String},
              reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, Optim.Options}=nothing)
     # Fit
-    nclasses = maximum(y)
+    nclasses = length(ylevels)
     nx       = size(X, 2)
     probs    = fill(0.0, nclasses)
     B0       = fill(0.0, nx * (nclasses - 1))
@@ -57,7 +49,6 @@ function fit(y, X, yname::String, ylevels::Vector{String}, xnames::Vector{String
     theta    = mdl.minimizer
 
     # Construct result
-    ylvls   = length(ylevels) == nclasses - 1 ? ylevels : ylevels[2:end]
     coef    = reshape(theta, nx, nclasses - 1)
     nobs    = length(y)
     loss    = mdl.minimum
@@ -76,92 +67,14 @@ function fit(y, X, yname::String, ylevels::Vector{String}, xnames::Vector{String
         @warn "The covariance matrix and standard errors are not available because the parameters are not maximum likelihood estimates"
         vcov = fill(NaN, nparams, nparams)
     end
-    MultinomialRegressionModel(yname, ylvls, xnames, coef, vcov, nobs, LL, loss)
+    MultinomialRegressionModel(yname, ylevels, xnames, coef, vcov, nobs, LL, loss)
 end
 
-predict(m::MultinomialRegressionModel, x) = update_probs!(fill(0.0, 1 + size(m.coef, 2)), m.coef, x)
-
-nparams(m::MultinomialRegressionModel)       = length(m.coef)
-nobs(m::MultinomialRegressionModel)          = m.nobs
-loglikelihood(m::MultinomialRegressionModel) = m.loglikelihood
-isregularized(m::MultinomialRegressionModel) = m.loss != -m.loglikelihood  # If not regularized, then loss == -LL
-
-coef(m::MultinomialRegressionModel) = AxisArray(m.coef, rownames=m.xnames, colnames=m.ylevels)
-
-function stderror(m::MultinomialRegressionModel)
-    se   = [sqrt(abs(m.vcov[i,i])) for i = 1:nparams(m)]
-    data = reshape(se, size(m.coef))
-    AxisArray(data, rownames=m.xnames, colnames=m.ylevels)
-end
-
-function coeftable(m::MultinomialRegressionModel, ci_level::Float64=0.95)
-    levstr   = isinteger(ci_level*100) ? string(Integer(ci_level*100)) : string(ci_level*100)
-    ni       = nparams(m)
-    b        = reshape(m.coef, ni)
-    se       = [sqrt(abs(m.vcov[i,i])) for i = 1:ni]
-    z        = b ./ se
-    pvals    = 2 * ccdf.(Ref(Normal()), abs.(z))
-    ci_width = -se * quantile(Normal(), (1-ci_level)/2)
-    data     = hcat(b, se, z, pvals, b-ci_width, b+ci_width)
-    colnames = ["Coef", "StdError", "z", "Pr(>|z|)", "Lower $levstr%", "Upper $levstr%"]
-    rownames = construct_vcov_rownames(m, true)
-    AxisArray(data, rownames=rownames, colnames=colnames)
-end
-
-function vcov(m::MultinomialRegressionModel)
-    colnames = construct_vcov_rownames(m, false)
-    rownames = construct_vcov_rownames(m, true)
-    AxisArray(m.vcov, rownames=rownames, colnames=colnames)
-end
-
-function coefcor(m::MultinomialRegressionModel)
-    se       = [sqrt(abs(m.vcov[i,i])) for i = 1:nparams(m)]
-    data     = StatsBase.cov2cor(m.vcov, se)
-    colnames = construct_vcov_rownames(m, false)
-    rownames = construct_vcov_rownames(m, true)
-    AxisArray(data, rownames=rownames, colnames=colnames)
-end
-
-function aic(m::MultinomialRegressionModel)
-    isregularized(m) && @warn "Model is regularized. AIC is not based on MLE."
-    2.0 * (nparams(m) - loglikelihood(m))
-end
-
-function aicc(m::MultinomialRegressionModel)
-    LL = loglikelihood(m)
-    k  = nparams(m)
-    n  = nobs(m)
-    isregularized(m) && @warn "Model is regularized. AICc is not based on MLE."
-    2.0*(k - LL) + 2.0*k*(k - 1.0)/(n - k - 1.0)
-end
-
-function bic(m::MultinomialRegressionModel)
-    isregularized(m) && @warn "Model is regularized. BIC is not based on MLE."
-    -2.0*loglikelihood(m) + nparams(m)*log(nobs(m))
-end
+predict(m::MultinomialRegressionModel, x) = _predict(m.coef, x)
+_predict(b, x) = update_probs!(fill(0.0, 1 + size(b, 2)), b, x)
 
 ################################################################################
-# Unexported
-
-function construct_vcov_rownames(m::MultinomialRegressionModel, align_vertically::Bool)
-    if align_vertically  # Suitable for row names
-        ylevel_maxlen  = maximum(length.(m.ylevels)) + 4  # +2 for "y=_  "
-        ylevels_padded = rpad.(["y=$(ylevel)  " for ylevel in m.ylevels], ylevel_maxlen)
-        xname_maxlen   = maximum(length.(m.xnames)) + 2   # +2 for "x="
-        xnames_padded  = rpad.(["x=$(xname)" for xname in m.xnames], xname_maxlen)
-        reshape(["$(ylevel)$(xname)" for xname in xnames_padded, ylevel in ylevels_padded], nparams(m))
-    else                 # Suitable for column names
-        reshape(["y=$(ylevel)  x=$(xname)" for xname in m.xnames, ylevel in m.ylevels], nparams(m))
-    end
-end
-
-function Base.show(io::IO, ::MIME"text/plain", table::AxisArray{T,1,D,Tuple{A}}) where {T,D,A}
-    pretty_table(table.data, header=[""], row_names=collect(table.axes[1].val))
-end
-
-function Base.show(io::IO, ::MIME"text/plain", table::AxisArray{T,2,D,Tuple{A1,A2}}) where {T,D,A1,A2}
-    pretty_table(table.data, header=collect(table.axes[2].val), row_names=collect(table.axes[1].val))
-end
+# Unexported functions for fitting a multinomial regression model
 
 # No regularization
 get_fg!(reg::Nothing, probs, y, X) = (_, gradb, b) -> -loglikelihood!(probs, gradb, y, X, b)
