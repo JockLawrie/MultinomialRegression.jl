@@ -14,6 +14,6 @@ using .fitpredict      # Depends on: regularization
 include("diagnostics.jl")
 include("diagnostics_multinomial.jl")
 using .diagnostics                # Independent
-using .diagnostics_multinomial    # Depends on: diagnostics, fitpredict.MultinomialRegressionModel, deriveddiagnostics.jl
+using .diagnostics_multinomial    # Depends on: fitpredict.MultinomialRegressionModel, diagnostics
 
 end

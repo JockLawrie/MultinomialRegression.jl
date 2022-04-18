@@ -17,7 +17,7 @@ import ..fitpredict: MultinomialRegressionModel
 using ..diagnostics
 import ..diagnostics: coef, vcov, stderror, nobs, nparams, loglikelihood, isregularized  # To be overloaded
 
-# Model-level diagnostics (aic, aicc, bic, coefcor, coeftable are defined in the deriveddiagnostics module)
+# Model-level diagnostics (aic, aicc, bic, coefcor, coeftable are defined in the diagnostics module)
 isregularized(m::MultinomialRegressionModel) = _isregularized(m.loglikelihood, m.loss)
 nobs(m::MultinomialRegressionModel)          = m.nobs
 loglikelihood(m::MultinomialRegressionModel) = m.loglikelihood

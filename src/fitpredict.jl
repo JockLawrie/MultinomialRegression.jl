@@ -21,15 +21,18 @@ struct MultinomialRegressionModel
 end
 
 function fit(f::FormulaTerm, data, reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, Optim.Options}=nothing)
-    yname   = string(f.lhs.sym)
-    ycatvec = data[!, yname] isa CategoricalVector ? data[!, yname] : categorical(data[!, yname])
-    ylevels = levels(ycatvec)
-    y       = ycatvec.refs
-    f       = apply_schema(f, schema(f, data))
-    c       = coefnames(f)  # (names(y), names(x))
-    xnames  = c[2]
-    X       = modelmatrix(f, data)  # Matrix{Float64}
+    yname  = string(f.lhs.sym)
+    y, ylevels = construct_y_and_ylevels(data[!, yname])
+    f      = apply_schema(f, schema(f, data))
+    c      = coefnames(f)  # (names(y), names(x))
+    xnames = c[2]
+    X      = modelmatrix(f, data)  # Matrix{Float64}
     fit(y, X, yname, ylevels, xnames, reg, opts)
+end
+
+function fit(y, X, yname, ylevels::Nothing, xnames, reg, opts)
+    y, ylevels = construct_y_and_ylevels(data[!, yname])
+    fit(ycat, X, yname, ylevels, xnames, reg, opts)
 end
 
 """
@@ -75,6 +78,17 @@ _predict(b, x) = update_probs!(fill(0.0, 1 + size(b, 2)), b, x)
 
 ################################################################################
 # Unexported functions for fitting a multinomial regression model
+
+"Construct categorical y and ylevels when the supplied y is not categorical."
+construct_y_and_ylevels(ydata::CategoricalVector) = ydata.refs, levels(ydata)
+
+function construct_y_and_ylevels(ydata::AbstractVector)
+    yvals   = sort!(unique(ydata))
+    ycatvec = categorical(ydata; levels=yvals)
+    ylevels = string.(levels(ycatvec))
+    y       = ycatvec.refs
+    y, ylevels
+end
 
 # No regularization
 get_fg!(reg::Nothing, probs, y, X) = (_, gradb, b) -> -loglikelihood!(probs, gradb, y, X, b)
