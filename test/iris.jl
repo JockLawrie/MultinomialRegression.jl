@@ -67,7 +67,12 @@ B2     = [1.852884572118782e-21 -1.3525808490106175; -1.4235665330836348e-10 -1.
 @test isapprox(coef(model), B2; atol=1e-10)
 @test isregularized(model)
 
-# Weighted fit
+# Weighted fit with each weight equal to 1
+w     = fill(1.0, 150)
+model = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris; wts=w)
+@test isapprox(coef(model), B; atol=1e-10)
+
+# Weighted fit with a mix of weights
 w = collect(0.25:0.01:1.75)
 splice!(w, findfirst(==(1.0), w))
 model = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris; wts=w)
