@@ -46,6 +46,16 @@ isapprox(B, B2; atol=1e-10)  # Reproducible result
   Note: Standard errors not yet available because the current method requires that the 
         parameters are maximum likelihood estimates, which regularized parameters usually aren't.
 =#
-model_L1 = fit(@formula(Species ~ 1 + SepalWidth), iris, L1(0.5))
-model_L2 = fit(@formula(Species ~ 1 + SepalWidth), iris, L2(0.5))
+model_L1 = fit(@formula(Species ~ 1 + SepalWidth), iris; reg=L1(0.5))
+model_L2 = fit(@formula(Species ~ 1 + SepalWidth), iris; reg=L2(0.5))
+
+# Weighted fit
+w = collect(0.25:0.01:1.75)
+splice!(w, findfirst(==(1.0), w))
+weighted_fit = fit(@formula(Species ~ 1 + SepalWidth), iris; wts=w)
+
+# Weights are scaled to sum to the number of observations
+w2 = 2*w
+weighted_fit2 = fit(@formula(Species ~ 1 + SepalWidth), iris; wts=w2)
+isapprox(coef(weighted_fit2), coef(weighted_fit); atol=1e-10)
 ```

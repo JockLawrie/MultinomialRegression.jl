@@ -12,9 +12,10 @@ X = Matrix(iris[:, ["intercept", "SepalLength", "SepalWidth", "PetalLength", "Pe
 model  = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris)
 iris.p = [predict(model, X[i, :]) for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
+B      = coef(model)
 B2     = [15.619498241390401 -27.018305571964458; -9.379861599935365 -11.84508179488949; -23.8502281938097 -30.531115207983206; 36.95799897683483 46.38738413069437; 10.435998075531359 28.722134963206237]
 @test isapprox(pmean, 0.9754110613097936; atol=1e-10)
-@test isapprox(coef(model), B2; atol=1e-10)
+@test isapprox(B, B2; atol=1e-10)
 @test !isregularized(model)
 
 # Model-level diagnostics
@@ -34,7 +35,6 @@ vcov(model)
 coefcor(model)
 
 # Access values
-B = coef(model)
 B["(Intercept)", "virginica"]
 B["(Intercept)", :]
 B[:, "virginica"]
@@ -57,5 +57,17 @@ B2     = [0.7888393490091408 -1.8380728113497204; -0.19997312515913346 -1.981765
 @test isapprox(pmean, 0.8709932476955314; atol=1e-10)
 @test isapprox(coef(model), B2; atol=1e-10)
 @test isregularized(model)
+
+# Weighted fit
+w = collect(0.25:0.01:1.75)
+splice!(w, findfirst(==(1.0), w))
+model = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris; wts=w)
+B2    = [16.127559313455407 -25.16921609276914; -7.689854268602372 -10.369812798632715; -17.193729922640664 -23.145562841624315; 26.836554931444297 36.520710594561244; 6.851897121946295 23.40631253745369]
+@test isapprox(coef(model), B2; atol=1e-10)
+
+# Test that weights are scaled to sum to the number of observations
+w2    = 2*w
+model = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris; wts=w2)
+@test isapprox(coef(model), B2; atol=1e-10)
 
 end
