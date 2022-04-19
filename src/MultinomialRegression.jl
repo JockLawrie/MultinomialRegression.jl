@@ -1,8 +1,9 @@
 module MultinomialRegression
 
-export MultinomialRegressionModel, @formula, fit, L1, L2, predict,  # Fit/predict
-       nparams, coef, stderror, coeftable, coefcor, vcov,           # Coefficient diagnostics
-       isregularized, nobs, loglikelihood, aic, aicc, bic           # Model diagnostics
+export MultinomialRegressionModel, @formula, fit, predict,  # Fit/predict
+       L1, L2, ElasticNet,                                  # Regularization
+       nparams, coef, stderror, coeftable, coefcor, vcov,   # Coefficient diagnostics
+       isregularized, nobs, loglikelihood, aic, aicc, bic   # Model diagnostics
 
 # Fit/predict
 include("regularization.jl")

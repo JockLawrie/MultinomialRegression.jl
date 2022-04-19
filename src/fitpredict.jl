@@ -113,7 +113,7 @@ end
 # No regularization
 get_fg!(reg::Nothing, probs, y, X, wts) = (_, gradb, b) -> -loglikelihood!(probs, gradb, y, X, b, wts)
 
-# L1 or L2 regularization
+# L1, L2 or ElasticNet regularization
 function get_fg!(reg, probs, y, X, wts)
     (_, gradb, b) -> begin
         loss = -loglikelihood!(probs, gradb, y, X, b, wts) + penalty(reg, b)

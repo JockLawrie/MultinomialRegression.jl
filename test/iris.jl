@@ -58,6 +58,15 @@ B2     = [0.7888393490091408 -1.8380728113497204; -0.19997312515913346 -1.981765
 @test isapprox(coef(model), B2; atol=1e-10)
 @test isregularized(model)
 
+# ElasticNet regularized fit
+model  = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris; reg=ElasticNet(0.5, 0.5))
+iris.p = [predict(model, X[i, :]) for i = 1:nrow(iris)]
+pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
+B2     = [1.852884572118782e-21 -1.3525808490106175; -1.4235665330836348e-10 -1.8282508130541715; -1.6813170037288188 -2.8222993906240093; 1.8646923442188061 4.082829660706014; -7.00894936397621e-10 3.1726435363590673]
+@test isapprox(pmean, 0.8516537261832; atol=1e-10)
+@test isapprox(coef(model), B2; atol=1e-10)
+@test isregularized(model)
+
 # Weighted fit
 w = collect(0.25:0.01:1.75)
 splice!(w, findfirst(==(1.0), w))
