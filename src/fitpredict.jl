@@ -36,7 +36,7 @@ Assumptions:
 1. y has categories numbered 1 to nclasses.
 2. The first category is the reference category.
 """
-function fit(y, X, yname::String, ylevels::Vector{String}, xnames::Vector{String}, wts::Union{Nothing, AbstractVector}=nothing,
+function fit(y, X, yname::String, ylevels::AbstractVector, xnames::Vector{String}, wts::Union{Nothing, AbstractVector}=nothing,
              reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, Optim.Options}=nothing)
     # Run checks and modify where appropriate
     format_weights!(wts)
@@ -84,7 +84,7 @@ construct_y_and_ylevels(ydata::CategoricalVector) = ydata.refs, levels(ydata)
 function construct_y_and_ylevels(ydata::AbstractVector)
     yvals   = sort!(unique(ydata))
     ycatvec = categorical(ydata; levels=yvals)
-    ylevels = string.(levels(ycatvec))
+    ylevels = levels(ycatvec)
     y       = ycatvec.refs
     y, ylevels
 end
