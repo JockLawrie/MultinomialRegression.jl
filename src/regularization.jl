@@ -1,6 +1,6 @@
 module regularization
 
-export AbstractRegularizer, L1, L2, ElasticNet, penalty, penalty_gradient!
+export AbstractRegularizer, penalty, penalty_gradient!, L1, L2, ElasticNet
 
 import LinearAlgebra: norm
 

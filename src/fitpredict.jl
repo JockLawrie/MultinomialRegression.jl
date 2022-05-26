@@ -1,6 +1,6 @@
 module fitpredict
 
-export MultinomialRegressionModel, @formula, fit, L1, L2, predict
+export MultinomialRegressionModel, @formula, fit, predict
 
 using CategoricalArrays
 using LinearAlgebra
