@@ -9,15 +9,29 @@ using StatsModels
 using ..regularization
 using ..lbfgs
 
-struct MultinomialRegressionModel
+struct MultinomialRegressionModel{T}
     yname::String
-    ylevels::Vector{String}
+    ylevels::Vector{T}
     xnames::Vector{String}
     coef::Matrix{Float64}
     vcov::Matrix{Float64}
     nobs::Int
     loglikelihood::Float64
     loss::Float64
+end
+
+"""
+Assumptions:
+1. y has categories numbered 1 to nclasses.
+2. The first category is the reference category.
+"""
+function fit(y, X, yname::String, ylevels::AbstractVector, xnames::Vector{String}, wts::Union{Nothing, AbstractVector}=nothing,
+             reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, T}=nothing) where{T}
+    format_weights!(wts)
+    loss, coef, vcov = fit_lbfgs(y, X, wts, reg, opts)
+    nobs = length(y)
+    LL   = penalty(reg, reshape(coef, length(coef))) - loss  # loss = -LL + penalty
+    MultinomialRegressionModel(yname, ylevels, xnames, coef, vcov, nobs, LL, loss)
 end
 
 function fit(f::FormulaTerm, data; wts::Union{Nothing, AbstractVector}=nothing,
@@ -31,25 +45,14 @@ function fit(f::FormulaTerm, data; wts::Union{Nothing, AbstractVector}=nothing,
     fit(y, X, yname, ylevels, xnames, wts, reg, opts)
 end
 
-"""
-Assumptions:
-1. y has categories numbered 1 to nclasses.
-2. The first category is the reference category.
-"""
-function fit(y, X, yname::String, ylevels::AbstractVector, xnames::Vector{String}, wts::Union{Nothing, AbstractVector}=nothing,
-             reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, T}=nothing) where{T}
-    format_weights!(wts)
-    loss, coef, vcov = fit_lbfgs(y, X, ylevels, wts, reg, opts)
-    nobs = length(y)
-    LL   = penalty(reg, reshape(coef, length(coef))) - loss  # loss = -LL + penalty
-    MultinomialRegressionModel(yname, ylevels, xnames, coef, vcov, nobs, LL, loss)
-end
+fit(y, X, wts, reg, opts) = fit(y, X, wts, sort!(unique(y)), ["x$(i)" for i = 1:size(X, 2)], reg, opts)
 
 predict(m::MultinomialRegressionModel, x) = _predict(m.coef, x)
-_predict(b, x) = update_probs!(fill(0.0, 1 + size(b, 2)), b, x)
 
 ################################################################################
 # Unexported
+
+_predict(b, x) = update_probs!(fill(0.0, 1 + size(b, 2)), b, x)
 
 "Construct categorical y and ylevels when the supplied y is not categorical."
 construct_y_and_ylevels(ydata::CategoricalVector) = ydata.refs, levels(ydata)

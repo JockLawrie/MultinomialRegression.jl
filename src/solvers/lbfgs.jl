@@ -8,10 +8,10 @@ using Optim
 
 using ..regularization
 
-function fit_lbfgs(y, X, ylevels::AbstractVector, wts::Union{Nothing, AbstractVector}=nothing,
+function fit_lbfgs(y, X, wts::Union{Nothing, AbstractVector}=nothing,
                    reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, Optim.Options}=nothing)
     # Fit
-    nclasses = length(ylevels)
+    nclasses = length(unique(y))
     nx       = size(X, 2)
     probs    = fill(0.0, nclasses)
     B0       = fill(0.0, nx * (nclasses - 1))
@@ -34,7 +34,7 @@ function fit_lbfgs(y, X, ylevels::AbstractVector, wts::Union{Nothing, AbstractVe
         if penalty(reg, theta) == 0.0
             @warn "Regularisation implies that the covariance matrix and standard errors are not estimated from MLEs"
         end
-        vcov = Hermitian(inv(bunchkaufman!(-H)))  # varcov(theta) = inv(FisherInformation) = inv(-Hessian)
+        vcov = Matrix(Hermitian(inv(bunchkaufman!(-H))))  # varcov(theta) = inv(FisherInformation) = inv(-Hessian)
     else
         @warn "Standard errors cannot be computed (Hessian does not have full rank). Check for linearly dependent predictors."
         vcov = fill(NaN, nparams, nparams)
@@ -111,17 +111,14 @@ weighted_grad(w, p, xj)          = p * xj * w
 weighted_grad(w::Nothing, xj) = xj
 weighted_grad(w, xj)          = xj * w
 
-hessian(X, probs, wts::Nothing, reg) = hessian(X, probs, fill(1.0, size(X, 1)), reg)
-
 """
 Let k = the number of categories, and let p = the number of predictors.
 The hessian is a (k-1) x (k-1) block matrix, with block size p x p.
 In the code below, i and j denote the block indices; i.e., i and j each have k-1 values.
 """
-@views function hessian(X, probs, wts, reg)
+@views function hessian!(H, X, probs, wts, reg)
     k  = size(probs, 2)  # nclasses
     p  = size(X, 2)      # npredictors
-    H  = fill(0.0, p*(k - 1), p*(k - 1))
     Xt = transpose(X)
     for j = 1:(k - 1)
         for i = j:(k - 1)
@@ -138,5 +135,14 @@ In the code below, i and j denote the block indices; i.e., i and j each have k-1
     penalty_hessian!(H, reg)
     H
 end
+
+function hessian(X, probs, wts, reg)
+    k  = size(probs, 2)  # nclasses
+    p  = size(X, 2)      # npredictors
+    H  = fill(0.0, p*(k - 1), p*(k - 1))
+    hessian!(H, X, probs, wts, reg)
+end
+
+hessian(X, probs, wts::Nothing, reg) = hessian(X, probs, fill(1.0, size(X, 1)), reg)
 
 end
