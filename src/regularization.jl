@@ -6,6 +6,9 @@ import LinearAlgebra: norm
 
 abstract type AbstractRegularizer end
 
+penalty(reg::Nothing, theta) = 0.0
+penalty_gradient!(gradB, reg::Nothing, B) = nothing
+
 ################################################################################
 # L1
 

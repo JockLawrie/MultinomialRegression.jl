@@ -7,8 +7,10 @@ export MultinomialRegressionModel, @formula, fit, predict,  # Fit/predict
 
 # Fit/predict
 include("regularization.jl")
+include("lbfgs.jl")
 include("fitpredict.jl")
 using .regularization  # Independent
+using .lbfgs           # Depends on: regularization
 using .fitpredict      # Depends on: regularization
 
 # Diagnostics
