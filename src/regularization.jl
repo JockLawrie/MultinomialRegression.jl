@@ -1,13 +1,14 @@
 module regularization
 
-export AbstractRegularizer, penalty, penalty_gradient!, L1, L2, ElasticNet
+export AbstractRegularizer, penalty, penalty_gradient!, penalty_hessian!, L1, L2, ElasticNet
 
 import LinearAlgebra: norm
 
 abstract type AbstractRegularizer end
 
-penalty(reg::Nothing, theta) = 0.0
-penalty_gradient!(gradB, reg::Nothing, B) = nothing
+penalty(reg, theta) = 0.0
+penalty_gradient!(gradB, reg, B) = nothing
+penalty_hessian!(H, reg) = nothing
 
 ################################################################################
 # L1
@@ -55,6 +56,15 @@ function penalty_gradient!(gradB, reg::L2, B)
     nothing
 end
 
+function penalty_hessian!(H, reg::L2)
+    lambda = reg.lambda
+    n = size(H, 1)
+    for i = 1:n
+        @inbounds H[i, i] += lambda
+    end
+    nothing
+end
+
 ################################################################################
 # ElasticNet
 
@@ -71,5 +81,7 @@ function penalty_gradient!(gradB, reg::ElasticNet, B)
     penalty_gradient!(gradB, reg.l1, B)
     penalty_gradient!(gradB, reg.l2, B)
 end
+
+penalty_hessian!(H, reg::ElasticNet) = penalty_hessian!(H, reg.l2)
 
 end

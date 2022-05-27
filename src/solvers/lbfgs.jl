@@ -29,7 +29,7 @@ function fit_lbfgs(y, X, ylevels::AbstractVector, wts::Union{Nothing, AbstractVe
     for i = 1:nobs
         update_probs!(view(probs, i, :), coef, view(X, i, :))
     end
-    H = hessian(X, probs, wts)
+    H = hessian(X, probs, wts, reg)
     if rank(H) == nparams
         if penalty(reg, theta) == 0.0
             @warn "Regularisation implies that the covariance matrix and standard errors are not estimated from MLEs"
@@ -52,21 +52,6 @@ function get_fg!(reg, probs, y, X, wts)
         loss
     end
 end
-
-# This method is called when computing standard errors
-function loglikelihood(y, X, b::AbstractVector{T}, wts) where T
-    nx       = size(X, 2)
-    nclasses = Int(length(b) / nx) + 1
-    probs    = zeros(T, nclasses)             # Accommodates ForwardDiff.Dual
-    gradb    = zeros(T, nx * (nclasses - 1))  # Accommodates ForwardDiff.Dual
-    loglikelihood!(probs, gradb, y, X, b, wts)
-end
-
-getweight(wts::Nothing, i) = nothing
-getweight(wts, i)          = wts[i]
-
-LL_delta(w::Nothing, probs, yi) = log(max(probs[yi], 1e-12))
-LL_delta(w, probs, yi)          = log(max(probs[yi], 1e-12)) * w
 
 function loglikelihood!(probs, gradb, y, X, b, wts)
     fill!(gradb, 0.0)
@@ -114,20 +99,26 @@ function update_gradient!(gradB, probs, yi, x, w)
     nothing
 end
 
+getweight(wts::Nothing, i) = nothing
+getweight(wts, i)          = wts[i]
+
+LL_delta(w::Nothing, probs, yi) = log(max(probs[yi], 1e-12))
+LL_delta(w, probs, yi)          = log(max(probs[yi], 1e-12)) * w
+
 weighted_grad(w::Nothing, p, xj) = p * xj
 weighted_grad(w, p, xj)          = p * xj * w
 
 weighted_grad(w::Nothing, xj) = xj
 weighted_grad(w, xj)          = xj * w
 
-hessian(X, probs, wts::Nothing) = hessian(X, probs, fill(1.0, size(X, 1)))
+hessian(X, probs, wts::Nothing, reg) = hessian(X, probs, fill(1.0, size(X, 1)), reg)
 
 """
 Let k = the number of categories, and let p = the number of predictors.
 The hessian is a (k-1) x (k-1) block matrix, with block size p x p.
 In the code below, i and j denote the block indices; i.e., i and j each have k-1 values.
 """
-@views function hessian(X, probs, wts)
+@views function hessian(X, probs, wts, reg)
     k  = size(probs, 2)  # nclasses
     p  = size(X, 2)      # npredictors
     H  = fill(0.0, p*(k - 1), p*(k - 1))
@@ -143,7 +134,9 @@ In the code below, i and j denote the block indices; i.e., i and j each have k-1
             end
         end
     end
-    Hermitian(H, :L)
+    H = Hermitian(H, :L)
+    penalty_hessian!(H, reg)
+    H
 end
 
 end
