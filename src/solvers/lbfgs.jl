@@ -1,6 +1,6 @@
 module lbfgs
 
-export fit_lbfgs
+export fit_optim
 
 using LinearAlgebra
 using Logging
@@ -8,8 +8,8 @@ using Optim
 
 using ..regularization
 
-function fit_lbfgs(y, X, wts::Union{Nothing, AbstractVector}=nothing,
-                   reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, Optim.Options}=nothing)
+function fit_optim(y, X, wts::Union{Nothing, AbstractVector}=nothing,
+                   reg::Union{Nothing, AbstractRegularizer}=nothing, solver, opts::Union{Nothing, Optim.Options}=nothing)
     # Fit
     nclasses = length(unique(y))
     nx       = size(X, 2)

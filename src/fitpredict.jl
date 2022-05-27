@@ -26,26 +26,27 @@ Assumptions:
 2. The first category is the reference category.
 """
 function fit(y, X, yname::String, ylevels::AbstractVector, xnames::Vector{String}, wts::Union{Nothing, AbstractVector}=nothing,
-             reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, T}=nothing) where{T}
+             reg::Union{Nothing, AbstractRegularizer}=nothing, solver=nothing, opts::Union{Nothing, T}=nothing) where{T}
     format_weights!(wts)
-    loss, coef, vcov = fit_lbfgs(y, X, wts, reg, opts)
+    loss, coef, vcov = fit_optim(y, X, wts, reg, solver, opts)
     nobs = length(y)
     LL   = penalty(reg, reshape(coef, length(coef))) - loss  # loss = -LL + penalty
     MultinomialRegressionModel(yname, ylevels, xnames, coef, vcov, nobs, LL, loss)
 end
 
 function fit(f::FormulaTerm, data; wts::Union{Nothing, AbstractVector}=nothing,
-             reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, T}=nothing) where{T}
+             reg::Union{Nothing, AbstractRegularizer}=nothing, solver=nothing, opts::Union{Nothing, T}=nothing) where{T}
     yname  = string(f.lhs.sym)
     y, ylevels = construct_y_and_ylevels(data[!, yname])
     f      = apply_schema(f, schema(f, data))
     c      = coefnames(f)  # (names(y), names(x))
     xnames = c[2]
     X      = modelmatrix(f, data)  # Matrix{Float64}
-    fit(y, X, yname, ylevels, xnames, wts, reg, opts)
+    fit(y, X, yname, ylevels, xnames, wts, reg, solver, opts)
 end
 
-fit(y, X, wts, reg, opts) = fit(y, X, wts, sort!(unique(y)), ["x$(i)" for i = 1:size(X, 2)], reg, opts)
+fit(y, X, wts=nothing, reg=nothing, solver=nothing, opts=nothing) = 
+    fit(y, X, wts, sort!(unique(y)), ["x$(i)" for i = 1:size(X, 2)], reg, solver, opts)
 
 predict(m::MultinomialRegressionModel, x) = _predict(m.coef, x)
 
