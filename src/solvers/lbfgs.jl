@@ -24,17 +24,19 @@ function fit_lbfgs(y, X, ylevels::AbstractVector, wts::Union{Nothing, AbstractVe
     loss    = mdl.minimum
     LL      = penalty(reg, theta) - loss  # loss = -LL + penalty
     nparams = length(theta)
-    if isapprox(-LL, loss, atol=1e-8)  # Estimated parameters are MLEs or very close to
-        f    = TwiceDifferentiable(b -> loglikelihood(y, X, b, wts), theta; autodiff=:forward)
-        hess = Optim.hessian!(f, theta)
-        if rank(hess) == nparams
-            vcov = inv(-hess)   # varcov(theta) = inv(FisherInformation) = inv(-Hessian)
-        else
-            @warn "Standard errors cannot be computed (Hessian does not have full rank). Check for linearly dependent predictors."
-            vcov = fill(NaN, nparams, nparams)
+    nobs    = length(y)
+    probs   = fill(0.0, nobs, nclasses)
+    for i = 1:nobs
+        update_probs!(view(probs, i, :), coef, view(X, i, :))
+    end
+    H = hessian(X, probs, wts)
+    if rank(H) == nparams
+        if penalty(reg, theta) == 0.0
+            @warn "Regularisation implies that the covariance matrix and standard errors are not estimated from MLEs"
         end
+        vcov = Hermitian(inv(bunchkaufman!(-H)))  # varcov(theta) = inv(FisherInformation) = inv(-Hessian)
     else
-        @warn "The covariance matrix and standard errors are not available because the parameters are not maximum likelihood estimates"
+        @warn "Standard errors cannot be computed (Hessian does not have full rank). Check for linearly dependent predictors."
         vcov = fill(NaN, nparams, nparams)
     end
     loss, coef, vcov
@@ -117,5 +119,31 @@ weighted_grad(w, p, xj)          = p * xj * w
 
 weighted_grad(w::Nothing, xj) = xj
 weighted_grad(w, xj)          = xj * w
+
+hessian(X, probs, wts::Nothing) = hessian(X, probs, fill(1.0, size(X, 1)))
+
+"""
+Let k = the number of categories, and let p = the number of predictors.
+The hessian is a (k-1) x (k-1) block matrix, with block size p x p.
+In the code below, i and j denote the block indices; i.e., i and j each have k-1 values.
+"""
+@views function hessian(X, probs, wts)
+    k  = size(probs, 2)  # nclasses
+    p  = size(X, 2)      # npredictors
+    H  = fill(0.0, p*(k - 1), p*(k - 1))
+    Xt = transpose(X)
+    for j = 1:(k - 1)
+        for i = j:(k - 1)
+            rows = (p*(i - 1) + 1):(p*i)
+            cols = (p*(j - 1) + 1):(p*j)
+            if i == j
+                H[rows, cols] = Xt * Diagonal(probs[:, i + 1] .* (probs[:, i + 1] .- 1) .* wts) * X
+            else
+                H[rows, cols] = Xt * Diagonal(probs[:, i + 1] .* probs[:, j + 1] .* wts) * X
+            end
+        end
+    end
+    Hermitian(H, :L)
+end
 
 end
