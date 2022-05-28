@@ -7,7 +7,7 @@ using LinearAlgebra
 using StatsModels
 
 using ..regularization
-using ..lbfgs
+using ..optim
 
 struct MultinomialRegressionModel{T}
     yname::String
@@ -53,8 +53,14 @@ predict(m::MultinomialRegressionModel, x) = _predict(m.coef, x)
 ################################################################################
 # Unexported
 
-_predict(b, x) = update_probs!(fill(0.0, 1 + size(b, 2)), b, x)
-
+function _predict(B, x)
+    nclasses = 1 + size(B, 2)
+    probs    = fill(0.0, nclasses)
+    probs[2:end] .= reshape(x' * B, nclasses - 1)
+    optim.softmax!(probs)
+    probs
+end
+    
 "Construct categorical y and ylevels when the supplied y is not categorical."
 construct_y_and_ylevels(ydata::CategoricalVector) = ydata.refs, levels(ydata)
 
@@ -83,19 +89,6 @@ function format_weights!(wts)
     m = n / s
     wts .*= m
     nothing
-end
-
-function update_probs!(probs, B, x)
-    probs[1] = 0.0  # bx for first category is 0
-    max_bx   = 0.0  # Find max bx for numerical stability
-    nclasses = length(probs)
-    for c = 2:nclasses
-        bx       = dot(x, view(B, :, c - 1))
-        probs[c] = bx
-        max_bx   = bx > max_bx ? bx : max_bx
-    end
-    probs .= exp.(probs .- max_bx)  # Subtract max_bx first for numerical stability. Then prob[c] <= 1.
-    normalize!(probs, 1)
 end
 
 end

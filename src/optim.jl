@@ -1,4 +1,4 @@
-module lbfgs
+module optim
 
 export fit_optim
 
@@ -11,23 +11,19 @@ using ..regularization
 function fit_optim(y, X, wts::Union{Nothing, AbstractVector}=nothing, reg::Union{Nothing, AbstractRegularizer}=nothing,
                    solver=nothing, opts::Union{Nothing, Optim.Options}=nothing)
     nclasses = length(unique(y))
-    nobs, nx = size(X)
-    probs = fill(0.0, nobs, nclasses)
-    model = optimise(y, X, wts, reg, solver, opts, probs)
-    b     = model.minimizer
-    B     = reshape(b, nx, nclasses - 1)
-    loss  = model.minimum
-    LL    = penalty(reg, b) - loss  # loss = -LL + penalty
+    nobs     = size(X, 1)
+    probs    = fill(0.0, nobs, nclasses)
+    loss, B  = optimise(y, X, wts, reg, solver, opts, probs)
     update_probs!(probs, B, X)
     H = hessian(X, wts, reg, probs)
-    if rank(H) == length(b)
-        if penalty(reg, b) == 0.0
+    if rank(H) == length(B)
+        if penalty(reg, B) == 0.0
             @warn "Regularisation implies that the covariance matrix and standard errors are not estimated from MLEs"
         end
         vcov = Matrix(Hermitian(inv(bunchkaufman!(-H))))  # varcov(b) = inv(FisherInformation) = inv(-Hessian)
     else
         @warn "Standard errors cannot be computed (Hessian does not have full rank). Check for linearly dependent predictors."
-        vcov = fill(NaN, length(b), length(b))
+        vcov = fill(NaN, length(B), length(B))
     end
     loss, B, vcov
 end
@@ -35,33 +31,41 @@ end
 ################################################################################
 # Unexported
 
+function optimise(y, X, wts, reg, solver, opts, probs)
+    solver   = isnothing(solver) ? :LBFGS : solver
+    nclasses = length(unique(y))
+    nobs, nx = size(X)
+    Y        = construct_Y(y, nobs, nclasses)
+    if solver == :LBFGS
+        fg!   = get_fg!(y, X, wts, reg, probs, Y)
+        b0    = fill(0.0, nx * (nclasses - 1))
+        model = isnothing(opts) ? optimize(Optim.only_fg!(fg!), b0, LBFGS()) : optimize(Optim.only_fg!(fg!), b0, LBFGS(), opts)
+        loss  = model.minimum
+        B     = reshape(model.minimizer, nx, nclasses - 1)
+        return loss, B
+    elseif solver == :Newton
+        fgh!  = get_fgh!(y, X, wts, reg, probs, Y)
+        b0    = fill(0.0, nx * (nclasses - 1))
+        model =  isnothing(opts) ? optimize(Optim.only_fgh!(fgh!), b0, Newton()) : optimize(Optim.only_fgh!(fgh!), b0, Newton(), opts)
+        loss  = model.minimum
+        B     = reshape(model.minimizer, nx, nclasses - 1)
+        return loss, B
+    elseif solver == :IRLS
+        maxiter = isnothing(opts) ? 250  : opts["maxiter"]
+        tol     = isnothing(opts) ? 1e-9 : opts["tol"]
+        loss, B = fit_irls(y, X, wts, reg, probs, Y, maxiter, tol)
+        return loss, B
+    else
+        error("Unrecognised solver: $(solver)")
+    end
+end
+
 function construct_Y(y, nobs, nclasses)
     Y = fill(0.0, nobs, nclasses)
     for (i, yi) in enumerate(y)
         Y[i, yi] = 1.0
     end
     Y
-end
-
-function optimise(y, X, wts, reg, solver, opts, probs)
-    solver   = isnothing(solver) ? :Newton : solver
-    nclasses = length(unique(y))
-    nobs, nx = size(X)
-    b0       = fill(0.0, nx * (nclasses - 1))
-    if solver == :NelderMead
-        f = get_f(y, X, wts, reg, probs)
-        return isnothing(opts) ? optimize(f, b0, NelderMead()) : optimize(f, b0, NelderMead(), opts)
-    elseif solver == :LBFGS
-        Y   = construct_Y(y, nobs, nclasses)
-        fg! = get_fg!(y, X, wts, reg, probs, Y)
-        return isnothing(opts) ? optimize(Optim.only_fg!(fg!), b0, LBFGS()) : optimize(Optim.only_fg!(fg!), b0, LBFGS(), opts)
-    elseif solver == :Newton
-        Y    = construct_Y(y, nobs, nclasses)
-        fgh! = get_fgh!(y, X, wts, reg, probs, Y)
-        return isnothing(opts) ? optimize(Optim.only_fgh!(fgh!), b0, Newton()) : optimize(Optim.only_fgh!(fgh!), b0, Newton(), opts)
-    else
-        error("Unrecognised solver: $(solver)")
-    end
 end
 
 function get_f(y, X, wts, reg, probs)
@@ -103,19 +107,20 @@ loglikelihood(y, probs, w)          = @inbounds sum(w[i]*log(max(probs[i, yi], 1
 loglikelihood(y, probs, w::Nothing) = @inbounds sum(     log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
 
 function update_probs!(probs, B, X)
-    ni = size(X, 1)
     probs[:, 1]     .= 0.0
-    probs[:, 2:end] .= X * B
+    probs[:, 2:end] .= X * B  # eta
+    rowwise_softmax!(probs)
+end
+
+function rowwise_softmax!(eta::AbstractMatrix)
+    ni = size(eta, 1)
     for i = 1:ni
-        eta_to_probs!(view(probs, i, :))
+        softmax!(view(eta, i, :))
     end
 end
 
-function eta_to_probs!(probs::AbstractVector)
-    max_bx = 0.0  # Find max bx for numerical stability
-    for (i, bx) in enumerate(probs)
-        max_bx = bx > max_bx ? bx : max_bx
-    end
+function softmax!(probs::AbstractVector)
+    max_bx = maximum(probs)
     probs .= exp.(probs .- max_bx)  # Subtract max_bx first for numerical stability. Then prob[c] <= 1.
     normalize!(probs, 1)
 end
@@ -187,6 +192,56 @@ function hessian(X, wts, reg, probs)
     H = fill(0.0, p*(k - 1), p*(k - 1))
     hessian!(H, X, wts, reg, probs)
     H
+end
+
+@views function fit_irls(y, X, wts, reg, probs, Y, maxiter, tol)
+    #F, lin_ind = omit_collinear_variables(X)
+    F     = qr(X, ColumnNorm())
+    Q     = Matrix(F.Q)
+    Qt    = transpose(Q)
+    n, p  = size(F)
+    k     = size(Y, 2)
+    B     = fill(0.0, p, k)
+    eta   = fill(0.0, n, k)
+    p_1mp = fill(0.0, n, k)
+    loss       = Inf
+    loss_prev  = Inf
+    converged  = false
+    for iter = 1:maxiter
+        loss_prev = loss
+        mul!(eta, Q, B)
+        copyto!(probs, eta)
+        rowwise_softmax!(probs)
+        loss   = -loglikelihood(y, probs, wts) + penalty(reg, B)
+        p_1mp .= max.(probs .* (1.0 .- probs), sqrt(eps()))
+        eta  .+= (Y .- probs) ./ p_1mp
+        update_p_1mp!(p_1mp, wts)  # p_1mp[i, :] = wts[i] .* p_1mp[i, :] for each i
+        for j = 2:k
+            C       = cholesky!(Hermitian(Qt * Diagonal(p_1mp[:, j]) * Q)).factors
+            B[:, j] = LowerTriangular(transpose(C)) \ (Qt * Diagonal(p_1mp[:, j]) * eta[:, j])
+            B[:, j] = UpperTriangular(C) \ B[:, j]
+        end
+        converged = isapprox(loss, loss_prev; atol=tol) || iszero(loss_prev)
+        converged && break
+    end
+    !converged && @warn "IRLS did not converge with tolerance $(tol). The last change in loss was $(abs(loss - loss_prev))"
+    loss, Matrix(B[:, 2:k])
+end
+
+update_p_1mp!(p_1mp, wts::Nothing) = nothing
+update_p_1mp!(p_1mp, wts) = (p_1mp .*= wts)
+
+function omit_collinear_variables(X)
+    F   = qr(X, Val(true))
+    qrr = count(x -> abs(x) ≥ sqrt(eps()), diag(F.R))
+    if qrr < size(F, 2)
+        lin_ind = sort!(invperm(F.p)[1:qrr])
+        X2 = convert(Matrix{Float64}, X[:,lin_ind])
+        F  = qr(X2, Val(true))
+    else
+        lin_ind = collect(1:size(F, 2))
+    end
+    F, lin_ind
 end
 
 end
