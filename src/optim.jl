@@ -15,12 +15,12 @@ function fit_optim(y, X, wts::Union{Nothing, AbstractVector}=nothing, reg::Union
     probs    = fill(0.0, nobs, nclasses)
     loss, B  = optimise(y, X, wts, reg, solver, opts, probs)
     update_probs!(probs, B, X)
-    H = hessian(X, wts, reg, probs)
+    H = hessian(X, wts, nothing, probs)  # hessian(-LL), not hessian(-LL + penalty)
     if rank(H) == length(B)
-        if penalty(reg, B) == 0.0
+        if !isnothing(reg)
             @warn "Regularisation implies that the covariance matrix and standard errors are not estimated from MLEs"
         end
-        vcov = Matrix(Hermitian(inv(bunchkaufman!(-H))))  # varcov(b) = inv(FisherInformation) = inv(-Hessian)
+        vcov = Matrix(Hermitian(inv(bunchkaufman!(H))))  # varcov(b) = inv(FisherInformation) = inv(Hessian(-LL))
     else
         @warn "Standard errors cannot be computed (Hessian does not have full rank). Check for linearly dependent predictors."
         vcov = fill(NaN, length(B), length(B))
@@ -32,15 +32,8 @@ end
 # Unexported
 
 function optimise(y, X, wts, reg, solver, opts, probs)
-    solver = isnothing(solver) ? :Newton : solver
-    c = cond(transpose(X) * X)
-    if c >= 30.0
-        @warn "X contains linear dependencies (condition number is $(c)). Switching to the LBFGS solver."
-        solver = :LBFGS
-    end
-    nclasses = length(unique(y))
-    nobs     = size(X, 1)
-    Y        = construct_Y(y, nobs, nclasses)
+    solver = select_solver(solver, X)
+    Y      = construct_Y(y, size(probs)...)
     if solver == :LBFGS
         return fit_lbfgs(y, X, wts, reg, probs, Y, opts)
     elseif solver == :Newton
@@ -56,6 +49,18 @@ function optimise(y, X, wts, reg, solver, opts, probs)
     end
 end
 
+function select_solver(solver, X)
+    result = isnothing(solver) ? :Newton : solver  # Default to Newton
+    if result == :Newton
+        c = cond(transpose(X) * X)
+        if c >= 30.0
+            @warn "X contains linear dependencies (condition number is $(c)). Switching to the LBFGS solver."
+            result = :LBFGS
+        end
+    end
+    result
+end
+
 function construct_Y(y, nobs, nclasses)
     Y = fill(0.0, nobs, nclasses)
     for (i, yi) in enumerate(y)
@@ -64,138 +69,16 @@ function construct_Y(y, nobs, nclasses)
     Y
 end
 
-function get_f(y, X, wts, reg, probs)
-    (b) -> begin
-        ni, nx = size(X)
-        nj = Int(length(b) / nx)  # nclasses - 1
-        B  = reshape(b, nx, nj)
-        update_probs!(probs, B, X)
-        -loglikelihood(y, probs, wts) + penalty(reg, b)
-    end
-end
-
-function get_fg!(y, X, wts, reg, probs, Y)
-    (_, g, b) -> begin
-        ni, nx = size(X)
-        nj = Int(length(b) / nx)  # nclasses - 1
-        B  = reshape(b, nx, nj)
-        G  = reshape(g, nx, nj)
-        update_probs!(probs, B, X)
-        gradient!(G, B, X, wts, reg, probs, Y)
-        -loglikelihood(y, probs, wts) + penalty(reg, b)
-    end
-end
-
-#=
-function get_fgh!(y, X, wts, reg, probs, Y)
-    (_, g, H, b) -> begin
-        ni, nx = size(X)
-        nj = Int(length(b) / nx)  # nclasses - 1
-        B  = reshape(b, nx, nj)
-        G  = reshape(g, nx, nj)
-        update_probs!(probs, B, X)
-        gradient!(G, B, X, wts, reg, probs, Y)
-        H2 = hessian!(H, X, wts, reg, probs)  # H2 is Hermitian
-        copyto!(H, -H2)
-        -loglikelihood(y, probs, wts) + penalty(reg, b)
-    end
-end
-=#
-
-loglikelihood(y, probs, w)          = @inbounds sum(w[i]*log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
-loglikelihood(y, probs, w::Nothing) = @inbounds sum(     log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
-
-function update_probs!(probs, B, X)
-    probs[:, 1]     .= 0.0
-    probs[:, 2:end] .= X * B  # eta
-    rowwise_softmax!(probs)
-end
-
-function rowwise_softmax!(eta::AbstractMatrix)
-    ni = size(eta, 1)
-    for i = 1:ni
-        softmax!(view(eta, i, :))
-    end
-end
-
-function softmax!(probs::AbstractVector)
-    max_bx = maximum(probs)
-    probs .= exp.(probs .- max_bx)  # Subtract max_bx first for numerical stability. Then prob[c] <= 1.
-    normalize!(probs, 1)
-end
-
-"Gradient of negative log-likelihood."
-function gradient!(G, B, X, wts, reg, probs, Y)
-    nclasses = size(Y, 2)
-    Y2 = view(Y, :, 2:nclasses)
-    P2 = view(probs, :, 2:nclasses)
-    G .= transpose(X) * Diagonal(wts) * (P2 .- Y2)  # Negative gradient because -LL is to be minimized
-    penalty_gradient!(G, reg, B)
-end
-
-function gradient!(G, B, X, wts::Nothing, reg, probs, Y)
-    nclasses = size(Y, 2)
-    Y2 = view(Y, :, 2:nclasses)
-    P2 = view(probs, :, 2:nclasses)
-    G .= transpose(X) * (P2 .- Y2)  # Negative gradient because -LL is to be minimized
-    penalty_gradient!(G, reg, B)
-end
-
-"""
-Hessian of log-likelihood.
-Let k = the number of categories, and let p = the number of predictors.
-The hessian is a (k-1) x (k-1) block matrix, with block size p x p.
-In the code below, i and j denote the block indices; i.e., i and j each have k-1 values.
-"""
-@views function hessian!(H, X, wts, reg, probs)
-    k  = size(probs, 2)  # nclasses
-    p  = size(X, 2)      # npredictors
-    Xt = transpose(X)
-    for j = 1:(k - 1)
-        for i = j:(k - 1)
-            rows = (p*(i - 1) + 1):(p*i)
-            cols = (p*(j - 1) + 1):(p*j)
-            if i == j
-                H[rows, cols] = Xt * Diagonal(probs[:, i + 1] .* (probs[:, i + 1] .- 1) .* wts) * X
-            else
-                H[rows, cols] = Xt * Diagonal(probs[:, i + 1] .* probs[:, j + 1] .* wts) * X
-            end
-        end
-    end
-    penalty_hessian!(H, reg)
-    Hermitian(H, :L)
-end
-
-@views function hessian!(H, X, wts::Nothing, reg, probs)
-    k  = size(probs, 2)  # nclasses
-    p  = size(X, 2)      # npredictors
-    Xt = transpose(X)
-    for j = 1:(k - 1)
-        for i = j:(k - 1)
-            rows = (p*(i - 1) + 1):(p*i)
-            cols = (p*(j - 1) + 1):(p*j)
-            if i == j
-                H[rows, cols] = Xt * Diagonal(probs[:, i + 1] .* (probs[:, i + 1] .- 1)) * X
-            else
-                H[rows, cols] = Xt * Diagonal(probs[:, i + 1] .* probs[:, j + 1]) * X
-            end
-        end
-    end
-    penalty_hessian!(H, reg)
-    Hermitian(H, :L)
-end
-
-function hessian(X, wts, reg, probs)
-    k = size(probs, 2)  # nclasses
-    p = size(X, 2)      # npredictors
-    H = fill(0.0, p*(k - 1), p*(k - 1))
-    hessian!(H, X, wts, reg, probs)
-end
-
 function fit_lbfgs(y, X, wts, reg, probs, Y, opts)
-    p      = size(X, 2)
-    k      = size(Y, 2)
-    fg!    = get_fg!(y, X, wts, reg, probs, Y)
+    p   = size(X, 2)
+    k   = size(Y, 2)
+    fg! = (_, g, b) -> begin
+        B  = reshape(b, p, k - 1)
+        G  = reshape(g, p, k - 1)
+        update_probs!(probs, B, X)
+        gradient!(G, B, X, wts, reg, probs, Y)
+        -loglikelihood(y, probs, wts) + penalty(reg, b)
+    end
     b0     = fill(0.0, p * (k - 1))
     fitted = isnothing(opts) ? optimize(Optim.only_fg!(fg!), b0, LBFGS()) : optimize(Optim.only_fg!(fg!), b0, LBFGS(), opts)
     loss   = fitted.minimum
@@ -205,11 +88,21 @@ end
 
 function fit_newton(y, X, wts, reg, probs, Y, maxiter, tol)
 #=
-    fgh!   = get_fgh!(y, X, wts, reg, probs, Y)
-    b0     = fill(0.0, nx * (nclasses - 1))
+    p    = size(X, 2)
+    k    = size(Y, 2)
+    fgh! = (_, g, H, b) -> begin
+        B = reshape(b, p, k - 1)
+        G = reshape(g, p, k - 1)
+        update_probs!(probs, B, X)
+        gradient!(G, B, X, wts, reg, probs, Y)  # grad(-LL + penalty)
+        H2 = hessian!(H, X, wts, reg, probs)    # hessian(-LL + penalty). H2 is Hermitian
+        copyto!(H, H2)
+        -loglikelihood(y, probs, wts) + penalty(reg, b)
+    end
+    b0     = fill(0.0, p * (k - 1))
     fitted = isnothing(opts) ? optimize(Optim.only_fgh!(fgh!), b0, Newton()) : optimize(Optim.only_fgh!(fgh!), b0, Newton(), opts)
     loss   = fitted.minimum
-    B      = reshape(fitted.minimizer, nx, nclasses - 1)
+    B      = reshape(fitted.minimizer, p, k - 1)
     return loss, B
 =#
     n, p = size(X)
@@ -226,10 +119,10 @@ function fit_newton(y, X, wts, reg, probs, Y, maxiter, tol)
         loss_prev = loss
         update_probs!(probs, B, X)
         loss = -loglikelihood(y, probs, wts) + penalty(reg, B)
-        gradient!(G, B, X, wts, reg, probs, Y)  # H = grad(-LL)    
-        H2 = hessian!(H, X, wts, reg, probs)    # H = hessian(LL), H2 = Hermitian(H)
+        gradient!(G, B, X, wts, reg, probs, Y)  # G = gradient(-LL + penalty)
+        H2 = hessian!(H, X, wts, reg, probs)    # H = hessian(-LL + penalty), H2 = Hermitian(H)
         cholesky!(H2, Val(false))
-        b .= b .+ H2\g  # hessian(LL)\grad(-LL) = -hessian(-LL)\grad(-LL)
+        b .-= H2\g
         converged = isapprox(loss, loss_prev; atol=tol) || iszero(loss_prev)
         converged && break
     end
@@ -269,6 +162,97 @@ end
 end
 
 update_p_1mp!(p_1mp, wts::Nothing) = nothing
-update_p_1mp!(p_1mp, wts) = (p_1mp .*= wts)   
+update_p_1mp!(p_1mp, wts) = (p_1mp .*= wts)
+
+loglikelihood(y, probs, w)          = @inbounds sum(w[i]*log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
+loglikelihood(y, probs, w::Nothing) = @inbounds sum(     log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
+
+function update_probs!(probs, B, X)
+    probs[:, 1]     .= 0.0
+    probs[:, 2:end] .= X * B  # eta
+    rowwise_softmax!(probs)
+end
+
+function rowwise_softmax!(eta::AbstractMatrix)
+    ni = size(eta, 1)
+    for i = 1:ni
+        softmax!(view(eta, i, :))
+    end
+end
+
+function softmax!(probs::AbstractVector)
+    max_bx = maximum(probs)
+    probs .= exp.(probs .- max_bx)  # Subtract max_bx first for numerical stability. Then prob[c] <= 1.
+    normalize!(probs, 1)
+end
+
+"grad(-LL + penalty)"
+function gradient!(G, B, X, wts, reg, probs, Y)
+    nclasses = size(Y, 2)
+    Y2 = view(Y, :, 2:nclasses)
+    P2 = view(probs, :, 2:nclasses)
+    G .= transpose(X) * Diagonal(wts) * (P2 .- Y2)  # Negative gradient because -LL is to be minimized
+    penalty_gradient!(G, reg, B)
+end
+
+function gradient!(G, B, X, wts::Nothing, reg, probs, Y)
+    nclasses = size(Y, 2)
+    Y2 = view(Y, :, 2:nclasses)
+    P2 = view(probs, :, 2:nclasses)
+    G .= transpose(X) * (P2 .- Y2)  # Negative gradient because -LL is to be minimized
+    penalty_gradient!(G, reg, B)
+end
+
+"""
+hessian(-LL + penalty)
+
+Let k = the number of categories, and let p = the number of predictors.
+The hessian is a (k-1) x (k-1) block matrix, with block size p x p.
+In the code below, i and j denote the block indices; i.e., i and j each have k-1 values.
+"""
+@views function hessian!(H, X, wts, reg, probs)
+    k  = size(probs, 2)  # nclasses
+    p  = size(X, 2)      # npredictors
+    Xt = transpose(X)
+    for j = 1:(k - 1)
+        for i = j:(k - 1)
+            rows = (p*(i - 1) + 1):(p*i)
+            cols = (p*(j - 1) + 1):(p*j)
+            if i == j
+                H[rows, cols] = Xt * Diagonal(probs[:, i + 1] .* (1 .- probs[:, i + 1]) .* wts) * X
+            else
+                H[rows, cols] = Xt * Diagonal(-probs[:, i + 1] .* probs[:, j + 1] .* wts) * X
+            end
+        end
+    end
+    penalty_hessian!(H, reg)
+    Hermitian(H, :L)
+end
+
+@views function hessian!(H, X, wts::Nothing, reg, probs)
+    k  = size(probs, 2)  # nclasses
+    p  = size(X, 2)      # npredictors
+    Xt = transpose(X)
+    for j = 1:(k - 1)
+        for i = j:(k - 1)
+            rows = (p*(i - 1) + 1):(p*i)
+            cols = (p*(j - 1) + 1):(p*j)
+            if i == j
+                H[rows, cols] = Xt * Diagonal(probs[:, i + 1] .* (1 .- probs[:, i + 1])) * X
+            else
+                H[rows, cols] = Xt * Diagonal(-probs[:, i + 1] .* probs[:, j + 1]) * X
+            end
+        end
+    end
+    penalty_hessian!(H, reg)
+    Hermitian(H, :L)
+end
+
+function hessian(X, wts, reg, probs)
+    k = size(probs, 2)  # nclasses
+    p = size(X, 2)      # npredictors
+    H = fill(0.0, p*(k - 1), p*(k - 1))
+    hessian!(H, X, wts, reg, probs)
+end
 
 end
