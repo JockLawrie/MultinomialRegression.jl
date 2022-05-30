@@ -32,29 +32,25 @@ end
 # Unexported
 
 function optimise(y, X, wts, reg, solver, opts, probs)
-    solver   = isnothing(solver) ? :LBFGS : solver
+    solver = isnothing(solver) ? :Newton : solver
+    c = cond(transpose(X) * X)
+    if c >= 30.0
+        @warn "X contains linear dependencies (condition number is $(c)). Switching to the LBFGS solver."
+        solver = :LBFGS
+    end
     nclasses = length(unique(y))
-    nobs, nx = size(X)
+    nobs     = size(X, 1)
     Y        = construct_Y(y, nobs, nclasses)
     if solver == :LBFGS
-        fg!   = get_fg!(y, X, wts, reg, probs, Y)
-        b0    = fill(0.0, nx * (nclasses - 1))
-        model = isnothing(opts) ? optimize(Optim.only_fg!(fg!), b0, LBFGS()) : optimize(Optim.only_fg!(fg!), b0, LBFGS(), opts)
-        loss  = model.minimum
-        B     = reshape(model.minimizer, nx, nclasses - 1)
-        return loss, B
+        return fit_lbfgs(y, X, wts, reg, probs, Y, opts)
     elseif solver == :Newton
-        fgh!  = get_fgh!(y, X, wts, reg, probs, Y)
-        b0    = fill(0.0, nx * (nclasses - 1))
-        model =  isnothing(opts) ? optimize(Optim.only_fgh!(fgh!), b0, Newton()) : optimize(Optim.only_fgh!(fgh!), b0, Newton(), opts)
-        loss  = model.minimum
-        B     = reshape(model.minimizer, nx, nclasses - 1)
-        return loss, B
-    elseif solver == :IRLS
-        maxiter = isnothing(opts) ? 250  : opts["maxiter"]
+        maxiter = isnothing(opts) ? 1000 : opts["maxiter"]
         tol     = isnothing(opts) ? 1e-9 : opts["tol"]
-        loss, B = fit_irls(y, X, wts, reg, probs, Y, maxiter, tol)
-        return loss, B
+        if isnothing(reg)
+            return fit_irls(y, X, wts, probs, Y, maxiter, tol)  # Special case of Newton that is faster
+        else
+            return fit_newton(y, X, wts, reg, probs, Y, maxiter, tol)
+        end
     else
         error("Unrecognised solver: $(solver)")
     end
@@ -90,6 +86,7 @@ function get_fg!(y, X, wts, reg, probs, Y)
     end
 end
 
+#=
 function get_fgh!(y, X, wts, reg, probs, Y)
     (_, g, H, b) -> begin
         ni, nx = size(X)
@@ -98,10 +95,12 @@ function get_fgh!(y, X, wts, reg, probs, Y)
         G  = reshape(g, nx, nj)
         update_probs!(probs, B, X)
         gradient!(G, B, X, wts, reg, probs, Y)
-        hessian!(H, X, wts, reg, probs)
+        H2 = hessian!(H, X, wts, reg, probs)  # H2 is Hermitian
+        copyto!(H, -H2)
         -loglikelihood(y, probs, wts) + penalty(reg, b)
     end
 end
+=#
 
 loglikelihood(y, probs, w)          = @inbounds sum(w[i]*log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
 loglikelihood(y, probs, w::Nothing) = @inbounds sum(     log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
@@ -125,6 +124,7 @@ function softmax!(probs::AbstractVector)
     normalize!(probs, 1)
 end
 
+"Gradient of negative log-likelihood."
 function gradient!(G, B, X, wts, reg, probs, Y)
     nclasses = size(Y, 2)
     Y2 = view(Y, :, 2:nclasses)
@@ -142,6 +142,7 @@ function gradient!(G, B, X, wts::Nothing, reg, probs, Y)
 end
 
 """
+Hessian of log-likelihood.
 Let k = the number of categories, and let p = the number of predictors.
 The hessian is a (k-1) x (k-1) block matrix, with block size p x p.
 In the code below, i and j denote the block indices; i.e., i and j each have k-1 values.
@@ -161,9 +162,8 @@ In the code below, i and j denote the block indices; i.e., i and j each have k-1
             end
         end
     end
-    H2 = Hermitian(H, :L)
-    penalty_hessian!(H2, reg)
-    copyto!(H, H2)
+    penalty_hessian!(H, reg)
+    Hermitian(H, :L)
 end
 
 @views function hessian!(H, X, wts::Nothing, reg, probs)
@@ -181,9 +181,8 @@ end
             end
         end
     end
-    H2 = Hermitian(H, :L)
-    penalty_hessian!(H2, reg)
-    copyto!(H, H2)
+    penalty_hessian!(H, reg)
+    Hermitian(H, :L)
 end
 
 function hessian(X, wts, reg, probs)
@@ -191,16 +190,57 @@ function hessian(X, wts, reg, probs)
     p = size(X, 2)      # npredictors
     H = fill(0.0, p*(k - 1), p*(k - 1))
     hessian!(H, X, wts, reg, probs)
-    H
 end
 
-@views function fit_irls(y, X, wts, reg, probs, Y, maxiter, tol)
-    #F, lin_ind = omit_collinear_variables(X)
-    F     = qr(X, ColumnNorm())
-    Q     = Matrix(F.Q)
-    Qt    = transpose(Q)
-    n, p  = size(F)
+function fit_lbfgs(y, X, wts, reg, probs, Y, opts)
+    p      = size(X, 2)
+    k      = size(Y, 2)
+    fg!    = get_fg!(y, X, wts, reg, probs, Y)
+    b0     = fill(0.0, p * (k - 1))
+    fitted = isnothing(opts) ? optimize(Optim.only_fg!(fg!), b0, LBFGS()) : optimize(Optim.only_fg!(fg!), b0, LBFGS(), opts)
+    loss   = fitted.minimum
+    B      = reshape(fitted.minimizer, p, k - 1)
+    loss, B
+end
+
+function fit_newton(y, X, wts, reg, probs, Y, maxiter, tol)
+#=
+    fgh!   = get_fgh!(y, X, wts, reg, probs, Y)
+    b0     = fill(0.0, nx * (nclasses - 1))
+    fitted = isnothing(opts) ? optimize(Optim.only_fgh!(fgh!), b0, Newton()) : optimize(Optim.only_fgh!(fgh!), b0, Newton(), opts)
+    loss   = fitted.minimum
+    B      = reshape(fitted.minimizer, nx, nclasses - 1)
+    return loss, B
+=#
+    n, p = size(X)
+    k    = size(Y, 2)
+    B    = fill(0.0, p, k - 1)
+    G    = fill(0.0, p, k - 1)
+    H    = fill(0.0, p*(k - 1), p*(k - 1))
+    b    = reshape(B, length(B))
+    g    = reshape(G, length(G))
+    loss      = Inf
+    loss_prev = Inf
+    converged = false
+    for iter = 1:maxiter
+        loss_prev = loss
+        update_probs!(probs, B, X)
+        loss = -loglikelihood(y, probs, wts) + penalty(reg, B)
+        gradient!(G, B, X, wts, reg, probs, Y)  # H = grad(-LL)    
+        H2 = hessian!(H, X, wts, reg, probs)    # H = hessian(LL), H2 = Hermitian(H)
+        cholesky!(H2, Val(false))
+        b .= b .+ H2\g  # hessian(LL)\grad(-LL) = -hessian(-LL)\grad(-LL)
+        converged = isapprox(loss, loss_prev; atol=tol) || iszero(loss_prev)
+        converged && break
+    end
+    !converged && @warn "The Newton solver did not converge with tolerance $(tol). The last change in loss was $(abs(loss - loss_prev))"
+    loss, B
+end
+
+@views function fit_irls(y, X, wts, probs, Y, maxiter, tol)
+    n, p  = size(X)
     k     = size(Y, 2)
+    Xt    = transpose(X)
     B     = fill(0.0, p, k)
     eta   = fill(0.0, n, k)
     p_1mp = fill(0.0, n, k)
@@ -209,16 +249,16 @@ end
     converged  = false
     for iter = 1:maxiter
         loss_prev = loss
-        mul!(eta, Q, B)
+        mul!(eta, X, B)
         copyto!(probs, eta)
         rowwise_softmax!(probs)
-        loss   = -loglikelihood(y, probs, wts) + penalty(reg, B)
+        loss   = -loglikelihood(y, probs, wts)
         p_1mp .= max.(probs .* (1.0 .- probs), sqrt(eps()))
         eta  .+= (Y .- probs) ./ p_1mp
         update_p_1mp!(p_1mp, wts)  # p_1mp[i, :] = wts[i] .* p_1mp[i, :] for each i
         for j = 2:k
-            C       = cholesky!(Hermitian(Qt * Diagonal(p_1mp[:, j]) * Q)).factors
-            B[:, j] = LowerTriangular(transpose(C)) \ (Qt * Diagonal(p_1mp[:, j]) * eta[:, j])
+            C       = cholesky!(Hermitian(Xt * Diagonal(p_1mp[:, j]) * X)).factors
+            B[:, j] = LowerTriangular(transpose(C)) \ (Xt * Diagonal(p_1mp[:, j]) * eta[:, j])
             B[:, j] = UpperTriangular(C) \ B[:, j]
         end
         converged = isapprox(loss, loss_prev; atol=tol) || iszero(loss_prev)
@@ -229,19 +269,6 @@ end
 end
 
 update_p_1mp!(p_1mp, wts::Nothing) = nothing
-update_p_1mp!(p_1mp, wts) = (p_1mp .*= wts)
-
-function omit_collinear_variables(X)
-    F   = qr(X, Val(true))
-    qrr = count(x -> abs(x) ≥ sqrt(eps()), diag(F.R))
-    if qrr < size(F, 2)
-        lin_ind = sort!(invperm(F.p)[1:qrr])
-        X2 = convert(Matrix{Float64}, X[:,lin_ind])
-        F  = qr(X2, Val(true))
-    else
-        lin_ind = collect(1:size(F, 2))
-    end
-    F, lin_ind
-end
+update_p_1mp!(p_1mp, wts) = (p_1mp .*= wts)   
 
 end
