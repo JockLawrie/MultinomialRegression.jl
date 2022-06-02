@@ -75,17 +75,16 @@ end
 function fit_irls(y, X, wts, probs, Y, maxiter, tol)
     n, p  = size(X)
     k     = size(Y, 2)
-    B     = fill(0.0, p, k)
-    dB    = fill(0.0, p, k)  # Bnew = B + dB
-    w     = fill(0.0, n, k)  # Working weights = wts .* p(1 - p)
+    B     = fill(0.0, p, k - 1)
+    dB    = fill(0.0, p, k - 1)  # Bnew = B + dB
+    w     = fill(0.0, n, k)      # Working weights = wts .* p(1 - p)
     Xt    = transpose(X)
     Xtw   = fill(0.0, p, n)  # Xt * Diagonal(working weights)
     XtwX  = fill(0.0, p, p)  # Xt * Diagonal(working weights) * X
     G     = fill(0.0, p, k)  # G = gradient(-LL) = -gradient(LL) = Xt * (probs .- Y)
-    Bview = view(B, :, 2:k)
     converged = false
     loss_prev = Inf  # Required for the warning message if convergence is not achieved
-    update_probs!(probs, Bview, X)
+    update_probs!(probs, B, X)
     loss = -loglikelihood(y, probs, wts)
     for iter = 1:maxiter
         # Update dB
@@ -95,7 +94,7 @@ function fit_irls(y, X, wts, probs, Y, maxiter, tol)
         for j = 2:k
             mul!(Xtw,  Xt, Diagonal(view(w, :, j)))
             mul!(XtwX, Xtw, X)
-            ldiv!(view(dB, :, j), cholesky!(Hermitian(XtwX)), view(G, :, j))  # Or: ldiv!(dB_j, qr!(XtwX), G_j)
+            ldiv!(view(dB, :, j - 1), cholesky!(Hermitian(XtwX)), view(G, :, j))  # Or: ldiv!(dB_j, qr!(XtwX), G_j)
         end
 
         # Update B
@@ -103,7 +102,7 @@ function fit_irls(y, X, wts, probs, Y, maxiter, tol)
 
         # Update loss
         loss_prev = loss
-        update_probs!(probs, Bview, X)
+        update_probs!(probs, B, X)
         loss = -loglikelihood(y, probs, wts)
 
         # Check for convergence
@@ -111,7 +110,7 @@ function fit_irls(y, X, wts, probs, Y, maxiter, tol)
         converged && break
     end
     !converged && @warn "IRLS did not converge with tolerance $(tol). The last change in loss was $(abs(loss - loss_prev))"
-    loss, Matrix(B[:, 2:k])
+    loss, B  #Matrix(B[:, 2:k])
 end
 
 set_working_weights!(w, probs, wts::Nothing) = (w .= max.(probs .* (1.0 .- probs), sqrt(eps())))
