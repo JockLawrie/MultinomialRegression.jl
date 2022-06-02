@@ -32,33 +32,22 @@ end
 # Unexported
 
 function optimise(y, X, wts, reg, solver, opts, probs)
-    solver = select_solver(solver, X)
+    solver = select_solver(solver, reg, X)
     Y      = construct_Y(y, size(probs)...)
     if solver == :LBFGS
         return fit_lbfgs(y, X, wts, reg, probs, Y, opts)
-    elseif solver == :Newton
-        maxiter = isnothing(opts) ? 1000 : opts["maxiter"]
-        tol     = isnothing(opts) ? 1e-9 : opts["tol"]
-        if isnothing(reg)
-            return fit_irls(y, X, wts, probs, Y, maxiter, tol)  # Special case of Newton that is faster
-        else
-            return fit_newton(y, X, wts, reg, probs, Y, maxiter, tol)
-        end
     else
-        error("Unrecognised solver: $(solver)")
+        maxiter = isnothing(opts) ? 250  : opts["maxiter"]
+        tol     = isnothing(opts) ? 1e-9 : opts["tol"]
+        return fit_irls(y, X, wts, probs, Y, maxiter, tol)
     end
 end
 
-function select_solver(solver, X)
-    result = isnothing(solver) ? :Newton : solver  # Default to Newton
-    if result == :Newton
-        c = cond(transpose(X) * X)
-        if c >= 30.0
-            @warn "X contains linear dependencies (condition number is $(c)). Switching to the LBFGS solver."
-            result = :LBFGS
-        end
-    end
-    result
+"Returns either :LBFGS or :IRLS."
+function select_solver(solver, reg, X)
+    !isnothing(reg) && return :LBFGS  # Regularized models can't use IRLS
+    !isnothing(solver) && solver == :LBFGS && return :LBFGS  # If user specifies LBFGS then use it
+    :IRLS
 end
 
 function construct_Y(y, nobs, nclasses)
@@ -73,8 +62,8 @@ function fit_lbfgs(y, X, wts, reg, probs, Y, opts)
     p   = size(X, 2)
     k   = size(Y, 2)
     fg! = (_, g, b) -> begin
-        B  = reshape(b, p, k - 1)
-        G  = reshape(g, p, k - 1)
+        B = reshape(b, p, k - 1)
+        G = reshape(g, p, k - 1)
         update_probs!(probs, B, X)
         gradient!(G, B, X, wts, reg, probs, Y)
         -loglikelihood(y, probs, wts) + penalty(reg, b)
@@ -88,9 +77,11 @@ end
 
 function fit_newton(y, X, wts, reg, probs, Y, maxiter, tol)
 #=
+opts = nothing
     p    = size(X, 2)
     k    = size(Y, 2)
     fgh! = (_, g, H, b) -> begin
+    println("typeof(H) = $(typeof(H))")
         B = reshape(b, p, k - 1)
         G = reshape(g, p, k - 1)
         update_probs!(probs, B, X)

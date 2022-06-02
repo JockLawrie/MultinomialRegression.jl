@@ -40,7 +40,7 @@ function fit(f::FormulaTerm, data; wts::Union{Nothing, AbstractVector}=nothing,
     y, ylevels = construct_y_and_ylevels(data[!, yname])
     f      = apply_schema(f, schema(f, data))
     c      = coefnames(f)  # (names(y), names(x))
-    xnames = c[2]
+    xnames = c[2] isa String ? [c[2]] : c[2]
     X      = modelmatrix(f, data)  # Matrix{Float64}
     fit(y, X, yname, ylevels, xnames, wts, reg, solver, opts)
 end
