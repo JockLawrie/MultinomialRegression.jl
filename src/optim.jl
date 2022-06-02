@@ -9,7 +9,7 @@ using Optim
 using ..regularization
 
 function fit_optim(y, X, wts::Union{Nothing, AbstractVector}=nothing, reg::Union{Nothing, AbstractRegularizer}=nothing,
-                   solver=nothing, opts::Union{Nothing, Optim.Options}=nothing)
+                   solver=nothing, opts::Union{Nothing, T}=nothing) where{T}
     nclasses = length(unique(y))
     nobs     = size(X, 1)
     probs    = fill(0.0, nobs, nclasses)
@@ -34,13 +34,10 @@ end
 function optimise(y, X, wts, reg, solver, opts, probs)
     solver = select_solver(solver, reg, X)
     Y      = construct_Y(y, size(probs)...)
-    if solver == :LBFGS
-        return fit_lbfgs(y, X, wts, reg, probs, Y, opts)
-    else
-        maxiter = isnothing(opts) ? 250  : opts["maxiter"]
-        tol     = isnothing(opts) ? 1e-9 : opts["tol"]
-        return fit_irls(y, X, wts, probs, Y, maxiter, tol)
-    end
+    solver == :LBFGS && return fit_lbfgs(y, X, wts, reg, probs, Y, opts)
+    maxiter = isnothing(opts) ? 250  : get(opts, "maxiter", 250)
+    tol     = isnothing(opts) ? 1e-6 : get(opts, "tol",     1e-6)
+    fit_irls(y, X, wts, probs, Y, maxiter, tol)
 end
 
 "Returns either :LBFGS or :IRLS."
@@ -75,94 +72,55 @@ function fit_lbfgs(y, X, wts, reg, probs, Y, opts)
     loss, B
 end
 
-function fit_newton(y, X, wts, reg, probs, Y, maxiter, tol)
-#=
-opts = nothing
-    p    = size(X, 2)
-    k    = size(Y, 2)
-    fgh! = (_, g, H, b) -> begin
-    println("typeof(H) = $(typeof(H))")
-        B = reshape(b, p, k - 1)
-        G = reshape(g, p, k - 1)
-        update_probs!(probs, B, X)
-        gradient!(G, B, X, wts, reg, probs, Y)  # grad(-LL + penalty)
-        H2 = hessian!(H, X, wts, reg, probs)    # hessian(-LL + penalty). H2 is Hermitian
-        copyto!(H, H2)
-        -loglikelihood(y, probs, wts) + penalty(reg, b)
-    end
-    b0     = fill(0.0, p * (k - 1))
-    fitted = isnothing(opts) ? optimize(Optim.only_fgh!(fgh!), b0, Newton()) : optimize(Optim.only_fgh!(fgh!), b0, Newton(), opts)
-    loss   = fitted.minimum
-    B      = reshape(fitted.minimizer, p, k - 1)
-    return loss, B
-=#
-    n, p = size(X)
-    k    = size(Y, 2)
-    B    = fill(0.0, p, k - 1)
-    G    = fill(0.0, p, k - 1)
-    H    = fill(0.0, p*(k - 1), p*(k - 1))
-    b    = reshape(B, length(B))
-    g    = reshape(G, length(G))
-    loss      = Inf
-    loss_prev = Inf
-    converged = false
-    for iter = 1:maxiter
-        loss_prev = loss
-        update_probs!(probs, B, X)
-        loss = -loglikelihood(y, probs, wts) + penalty(reg, B)
-        gradient!(G, B, X, wts, reg, probs, Y)  # G = gradient(-LL + penalty)
-        H2 = hessian!(H, X, wts, reg, probs)    # H = hessian(-LL + penalty), H2 = Hermitian(H)
-        cholesky!(H2, Val(false))
-        b .-= H2\g
-        converged = isapprox(loss, loss_prev; atol=tol) || iszero(loss_prev)
-        converged && break
-    end
-    !converged && @warn "The Newton solver did not converge with tolerance $(tol). The last change in loss was $(abs(loss - loss_prev))"
-    loss, B
-end
-
 function fit_irls(y, X, wts, probs, Y, maxiter, tol)
     n, p  = size(X)
     k     = size(Y, 2)
     B     = fill(0.0, p, k)
-    eta   = fill(0.0, n, k)  # eta = XB
-    p_1mp = fill(0.0, n, k)  # p(1 - p)
-    Xtw   = fill(0.0, p, n)  # Xt * Diagonal(working weights)
-    XtwX  = fill(0.0, p, p)  # Xt * Diagonal(working weights) * X
-    XtwEta_j  = fill(0.0, p)  # Xtw * eta_j = Xt * Diagonal(working weights) * eta[:, j]
+    eta   = fill(0.0, n, k)   # eta = XB
+    p_1mp = fill(0.0, n, k)   # p(1 - p)
+    Xtw   = fill(0.0, p, n)   # Xt * Diagonal(working weights)
+    XtwX  = fill(0.0, p, p)   # Xt * Diagonal(working weights) * X
+    XtwResid  = fill(0.0, p)  # Xtw * eta_j = Xt * Diagonal(working weights) * eta[:, j]
     Xt        = transpose(X)
-    loss      = Inf
-    loss_prev = Inf
     converged = false
+    loss_prev = Inf
+    mul!(eta, X, B)
+    copyto!(probs, eta)
+    rowwise_softmax!(probs)
+    loss = -loglikelihood(y, probs, wts)
     for iter = 1:maxiter
+        # Update B
+        p_1mp .= max.(probs .* (1.0 .- probs), sqrt(eps()))
+        eta  .+= (Y .- probs) ./ p_1mp    # Set eta   = working residuals = X*B .+ (Y -. probs) ./ p_1mp
+        set_working_weights!(p_1mp, wts)  # Set p_1mp = working weights   = wts .* p_1mp
+        for j = 2:k
+            w     = view(p_1mp, :, j)  # Working weights
+            resid = view(eta, :, j)    # Working residuals
+            B_j   = view(B, :, j)
+            mul!(Xtw,  Xt, Diagonal(w))
+            mul!(XtwX, Xtw, X)
+            mul!(XtwResid, Xtw, resid)
+            #ldiv!(B_j, qr!(XtwX), XtwResid)
+            #ldiv!(B_j, cholesky!(Hermitian(XtwX)), XtwResid)
+            C = cholesky!(Hermitian(XtwX)).factors
+            ldiv!(B_j, LowerTriangular(transpose(C)), XtwResid)
+            ldiv!(B_j, UpperTriangular(C), B_j)
+        end
+        # Update loss
         loss_prev = loss
         mul!(eta, X, B)
         copyto!(probs, eta)
         rowwise_softmax!(probs)
-        loss   = -loglikelihood(y, probs, wts)
-        p_1mp .= max.(probs .* (1.0 .- probs), sqrt(eps()))
-        eta  .+= (Y .- probs) ./ p_1mp
-        update_p_1mp!(p_1mp, wts)  # Set p_1mp to working weights
-        for j = 2:k
-            w     = view(p_1mp, :, j)  # Working weights
-            eta_j = view(eta, :, j)
-            B_j   = view(B, :, j)
-            mul!(Xtw,  Xt, Diagonal(w))
-            mul!(XtwX, Xtw, X)
-            mul!(XtwEta_j, Xtw, eta_j)
-            C = cholesky!(Hermitian(XtwX)).factors
-            ldiv!(B_j, LowerTriangular(transpose(C)), XtwEta_j)
-            ldiv!(B_j, UpperTriangular(C), B_j)
-        end
-        converged = isapprox(loss, loss_prev; atol=tol) || iszero(loss_prev)
+        loss = -loglikelihood(y, probs, wts)
+        converged = isapprox(loss, loss_prev; rtol=tol) || iszero(loss_prev)
         converged && break
     end
     !converged && @warn "IRLS did not converge with tolerance $(tol). The last change in loss was $(abs(loss - loss_prev))"
     loss, Matrix(B[:, 2:k])
 end
 
-update_p_1mp!(p_1mp, wts::Nothing) = nothing
-update_p_1mp!(p_1mp, wts) = (p_1mp .*= wts)
+set_working_weights!(p_1mp, wts::Nothing) = nothing
+set_working_weights!(p_1mp, wts) = (p_1mp .*= wts)
 
 loglikelihood(y, probs, w)          = @inbounds sum(w[i]*log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
 loglikelihood(y, probs, w::Nothing) = @inbounds sum(     log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
