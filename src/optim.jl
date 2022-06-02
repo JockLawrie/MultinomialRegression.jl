@@ -76,42 +76,37 @@ function fit_irls(y, X, wts, probs, Y, maxiter, tol)
     n, p  = size(X)
     k     = size(Y, 2)
     B     = fill(0.0, p, k)
-    eta   = fill(0.0, n, k)   # eta = XB
-    p_1mp = fill(0.0, n, k)   # p(1 - p)
-    Xtw   = fill(0.0, p, n)   # Xt * Diagonal(working weights)
-    XtwX  = fill(0.0, p, p)   # Xt * Diagonal(working weights) * X
-    XtwResid  = fill(0.0, p)  # Xtw * eta_j = Xt * Diagonal(working weights) * eta[:, j]
-    Xt        = transpose(X)
+    dB    = fill(0.0, p, k)  # Bnew = B + dB
+    w     = fill(0.0, n, k)  # Working weights = wts .* p(1 - p)
+    Xt    = transpose(X)
+    Xtw   = fill(0.0, p, n)  # Xt * Diagonal(working weights)
+    XtwX  = fill(0.0, p, p)  # Xt * Diagonal(working weights) * X
+    G     = fill(0.0, p, k)  # G = gradient(-LL) = -gradient(LL) = Xt * (probs .- Y)
+    Bview = view(B, :, 2:k)
     converged = false
-    loss_prev = Inf
-    mul!(eta, X, B)
-    copyto!(probs, eta)
-    rowwise_softmax!(probs)
+    loss_prev = Inf  # Required for the warning message if convergence is not achieved
+    update_probs!(probs, Bview, X)
     loss = -loglikelihood(y, probs, wts)
     for iter = 1:maxiter
-        # Update B
-        p_1mp .= max.(probs .* (1.0 .- probs), sqrt(eps()))
-        eta  .+= (Y .- probs) ./ p_1mp    # Set eta   = working residuals = X*B .+ (Y -. probs) ./ p_1mp
-        set_working_weights!(p_1mp, wts)  # Set p_1mp = working weights   = wts .* p_1mp
+        # Update dB
+        set_working_weights!(w, probs, wts)  # Set working weights = w = wts .* p_1mp
+        probs .-= Y
+        gradient!(G, Xt, probs, wts, Xtw)    # gradient(-LL) = -gradient(LL)
         for j = 2:k
-            w     = view(p_1mp, :, j)  # Working weights
-            resid = view(eta, :, j)    # Working residuals
-            B_j   = view(B, :, j)
-            mul!(Xtw,  Xt, Diagonal(w))
+            mul!(Xtw,  Xt, Diagonal(view(w, :, j)))
             mul!(XtwX, Xtw, X)
-            mul!(XtwResid, Xtw, resid)
-            #ldiv!(B_j, qr!(XtwX), XtwResid)
-            #ldiv!(B_j, cholesky!(Hermitian(XtwX)), XtwResid)
-            C = cholesky!(Hermitian(XtwX)).factors
-            ldiv!(B_j, LowerTriangular(transpose(C)), XtwResid)
-            ldiv!(B_j, UpperTriangular(C), B_j)
+            ldiv!(view(dB, :, j), cholesky!(Hermitian(XtwX)), view(G, :, j))  # Or: ldiv!(dB_j, qr!(XtwX), G_j)
         end
+
+        # Update B
+        B .-= dB  # The minus is due to the negative gradient used to obtain dB
+
         # Update loss
         loss_prev = loss
-        mul!(eta, X, B)
-        copyto!(probs, eta)
-        rowwise_softmax!(probs)
+        update_probs!(probs, Bview, X)
         loss = -loglikelihood(y, probs, wts)
+
+        # Check for convergence
         converged = isapprox(loss, loss_prev; rtol=tol) || iszero(loss_prev)
         converged && break
     end
@@ -119,15 +114,15 @@ function fit_irls(y, X, wts, probs, Y, maxiter, tol)
     loss, Matrix(B[:, 2:k])
 end
 
-set_working_weights!(p_1mp, wts::Nothing) = nothing
-set_working_weights!(p_1mp, wts) = (p_1mp .*= wts)
+set_working_weights!(w, probs, wts::Nothing) = (w .= max.(probs .* (1.0 .- probs), sqrt(eps())))
+set_working_weights!(w, probs, wts) = (w .= wts .* max.(probs .* (1.0 .- probs), sqrt(eps())))
 
 loglikelihood(y, probs, w)          = @inbounds sum(w[i]*log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
 loglikelihood(y, probs, w::Nothing) = @inbounds sum(     log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
 
 function update_probs!(probs, B, X)
-    probs[:, 1]     .= 0.0
-    probs[:, 2:end] .= X * B  # eta
+    fill!(view(probs, :, 1), 0.0)
+    mul!(view(probs, :, 2:size(probs, 2)), X, B)
     rowwise_softmax!(probs)
 end
 
@@ -159,6 +154,15 @@ function gradient!(G, B, X, wts::Nothing, reg, probs, Y)
     P2 = view(probs, :, 2:nclasses)
     G .= transpose(X) * (P2 .- Y2)  # Negative gradient because -LL is to be minimized
     penalty_gradient!(G, reg, B)
+end
+
+# gradient(-LL) used in IRLS
+gradient!(G, Xt, probs_minus_Y, wts::Nothing, Xtw) = mul!(G, Xt, probs_minus_Y)
+
+# gradient(-LL) used in IRLS
+function gradient!(G, Xt, probs_minus_Y, wts, Xtw)
+    mul!(Xtw, Xt, Diagonal(wts))
+    mul!(G, Xtw, probs)
 end
 
 """
