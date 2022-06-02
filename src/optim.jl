@@ -121,16 +121,19 @@ opts = nothing
     loss, B
 end
 
-@views function fit_irls(y, X, wts, probs, Y, maxiter, tol)
+function fit_irls(y, X, wts, probs, Y, maxiter, tol)
     n, p  = size(X)
     k     = size(Y, 2)
-    Xt    = transpose(X)
     B     = fill(0.0, p, k)
-    eta   = fill(0.0, n, k)
-    p_1mp = fill(0.0, n, k)
-    loss       = Inf
-    loss_prev  = Inf
-    converged  = false
+    eta   = fill(0.0, n, k)  # eta = XB
+    p_1mp = fill(0.0, n, k)  # p(1 - p)
+    Xtw   = fill(0.0, p, n)  # Xt * Diagonal(working weights)
+    XtwX  = fill(0.0, p, p)  # Xt * Diagonal(working weights) * X
+    XtwEta_j  = fill(0.0, p)  # Xtw * eta_j = Xt * Diagonal(working weights) * eta[:, j]
+    Xt        = transpose(X)
+    loss      = Inf
+    loss_prev = Inf
+    converged = false
     for iter = 1:maxiter
         loss_prev = loss
         mul!(eta, X, B)
@@ -139,11 +142,17 @@ end
         loss   = -loglikelihood(y, probs, wts)
         p_1mp .= max.(probs .* (1.0 .- probs), sqrt(eps()))
         eta  .+= (Y .- probs) ./ p_1mp
-        update_p_1mp!(p_1mp, wts)  # p_1mp[i, :] = wts[i] .* p_1mp[i, :] for each i
+        update_p_1mp!(p_1mp, wts)  # Set p_1mp to working weights
         for j = 2:k
-            C       = cholesky!(Hermitian(Xt * Diagonal(p_1mp[:, j]) * X)).factors
-            B[:, j] = LowerTriangular(transpose(C)) \ (Xt * Diagonal(p_1mp[:, j]) * eta[:, j])
-            B[:, j] = UpperTriangular(C) \ B[:, j]
+            w     = view(p_1mp, :, j)  # Working weights
+            eta_j = view(eta, :, j)
+            B_j   = view(B, :, j)
+            mul!(Xtw,  Xt, Diagonal(w))
+            mul!(XtwX, Xtw, X)
+            mul!(XtwEta_j, Xtw, eta_j)
+            C = cholesky!(Hermitian(XtwX)).factors
+            ldiv!(B_j, LowerTriangular(transpose(C)), XtwEta_j)
+            ldiv!(B_j, UpperTriangular(C), B_j)
         end
         converged = isapprox(loss, loss_prev; atol=tol) || iszero(loss_prev)
         converged && break
