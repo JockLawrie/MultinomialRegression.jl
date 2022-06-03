@@ -56,14 +56,16 @@ function construct_Y(y, nobs, nclasses)
 end
 
 function fit_lbfgs(y, X, wts, reg, probs, Y, opts)
-    p   = size(X, 2)
-    k   = size(Y, 2)
+    n, p = size(X)
+    k    = size(Y, 2)
+    Xtw  = isnothing(wts) ? nothing : fill(0.0, p, n)
     fg! = (_, g, b) -> begin
         B = reshape(b, p, k - 1)
         G = reshape(g, p, k - 1)
         update_probs!(probs, B, X)
-        gradient!(G, B, X, wts, reg, probs, Y)
-        -loglikelihood(y, probs, wts) + penalty(reg, b)
+        loss = -loglikelihood(y, probs, wts) + penalty(reg, b)
+        gradient!(G, B, X, wts, reg, probs, Y, Xtw)
+        loss
     end
     b0     = fill(0.0, p * (k - 1))
     fitted = isnothing(opts) ? optimize(Optim.only_fg!(fg!), b0, LBFGS()) : optimize(Optim.only_fg!(fg!), b0, LBFGS(), opts)
@@ -77,24 +79,27 @@ function fit_irls(y, X, wts, probs, Y, maxiter, tol)
     k     = size(Y, 2)
     B     = fill(0.0, p, k - 1)
     dB    = fill(0.0, p, k - 1)  # Bnew = B + dB
-    w     = fill(0.0, n, k)      # Working weights = wts .* p(1 - p)
+    w     = fill(0.0, n, k - 1)  # Working weights = wts .* p(1 - p)
+    G     = fill(0.0, p, k - 1)  # G = gradient(-LL) = -gradient(LL) = Xt * (probs .- Y)
     Xt    = transpose(X)
     Xtw   = fill(0.0, p, n)  # Xt * Diagonal(working weights)
     XtwX  = fill(0.0, p, p)  # Xt * Diagonal(working weights) * X
-    G     = fill(0.0, p, k)  # G = gradient(-LL) = -gradient(LL) = Xt * (probs .- Y)
+    probsview = view(probs, :, 2:k)
+    Yview     = view(Y, :, 2:k)
     converged = false
     loss_prev = Inf  # Required for the warning message if convergence is not achieved
     update_probs!(probs, B, X)
     loss = -loglikelihood(y, probs, wts)
+    d = sqrt(eps())
     for iter = 1:maxiter
         # Update dB
-        set_working_weights!(w, probs, wts)  # Set working weights = w = wts .* p_1mp
-        probs .-= Y
-        gradient!(G, Xt, probs, wts, Xtw)    # gradient(-LL) = -gradient(LL)
+        set_working_weights!(w, probsview, wts, d)  # Set working weights = w = wts .* p_1mp
+        probsview .-= Yview
+        gradient!(G, Xt, probsview, wts, Xtw)  # gradient(-LL) = -gradient(LL)
         for j = 2:k
-            mul!(Xtw,  Xt, Diagonal(view(w, :, j)))
+            mul!(Xtw,  Xt, Diagonal(view(w, :, j - 1)))
             mul!(XtwX, Xtw, X)
-            ldiv!(view(dB, :, j - 1), cholesky!(Hermitian(XtwX)), view(G, :, j))  # Or: ldiv!(dB_j, qr!(XtwX), G_j)
+            ldiv!(view(dB, :, j - 1), cholesky!(Hermitian(XtwX)), view(G, :, j - 1))  # Or: ldiv!(dB_j, qr!(XtwX), G_j)
         end
 
         # Update B
@@ -110,11 +115,11 @@ function fit_irls(y, X, wts, probs, Y, maxiter, tol)
         converged && break
     end
     !converged && @warn "IRLS did not converge with tolerance $(tol). The last change in loss was $(abs(loss - loss_prev))"
-    loss, B  #Matrix(B[:, 2:k])
+    loss, B
 end
 
-set_working_weights!(w, probs, wts::Nothing) = (w .= max.(probs .* (1.0 .- probs), sqrt(eps())))
-set_working_weights!(w, probs, wts) = (w .= wts .* max.(probs .* (1.0 .- probs), sqrt(eps())))
+set_working_weights!(w, probs, wts::Nothing, d) = (w .=        max.(d, probs .* (1.0 .- probs)))
+set_working_weights!(w, probs, wts, d)          = (w .= wts .* max.(d, probs .* (1.0 .- probs)))
 
 loglikelihood(y, probs, w)          = @inbounds sum(w[i]*log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
 loglikelihood(y, probs, w::Nothing) = @inbounds sum(     log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
@@ -139,19 +144,12 @@ function softmax!(probs::AbstractVector)
 end
 
 "grad(-LL + penalty)"
-function gradient!(G, B, X, wts, reg, probs, Y)
-    nclasses = size(Y, 2)
-    Y2 = view(Y, :, 2:nclasses)
-    P2 = view(probs, :, 2:nclasses)
-    G .= transpose(X) * Diagonal(wts) * (P2 .- Y2)  # Negative gradient because -LL is to be minimized
-    penalty_gradient!(G, reg, B)
-end
-
-function gradient!(G, B, X, wts::Nothing, reg, probs, Y)
-    nclasses = size(Y, 2)
-    Y2 = view(Y, :, 2:nclasses)
-    P2 = view(probs, :, 2:nclasses)
-    G .= transpose(X) * (P2 .- Y2)  # Negative gradient because -LL is to be minimized
+function gradient!(G, B, X, wts, reg, probs, Y, Xtw)
+    k  = size(Y, 2)
+    Y2 = view(Y, :, 2:k)
+    P2 = view(probs, :, 2:k)
+    P2 .-= Y2
+    gradient!(G, transpose(X), P2, wts, Xtw)
     penalty_gradient!(G, reg, B)
 end
 
@@ -161,7 +159,7 @@ gradient!(G, Xt, probs_minus_Y, wts::Nothing, Xtw) = mul!(G, Xt, probs_minus_Y)
 # gradient(-LL) used in IRLS
 function gradient!(G, Xt, probs_minus_Y, wts, Xtw)
     mul!(Xtw, Xt, Diagonal(wts))
-    mul!(G, Xtw, probs)
+    mul!(G, Xtw, probs_minus_Y)
 end
 
 """
