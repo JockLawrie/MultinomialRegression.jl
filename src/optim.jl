@@ -87,7 +87,7 @@ function fit_irls(y, X, wts, probs, maxiter, tol)
         probs_minus_y!(probs, y)
         gradient!(G, Xt, probsview, wts, XtW)  # gradient(-LL) = -gradient(LL)
         for j = 2:k
-            quadraticform!(XtWX, Xt, Diagonal(view(W, :, j - 1)), X, XtW)
+            multiply_3_matrices!(XtWX, XtW, Xt, Diagonal(view(W, :, j - 1)), X)
             ldiv!(view(dB, :, j - 1), cholesky!(Hermitian(XtWX)), view(G, :, j - 1))  # Or: ldiv!(dB_j, qr!(XtWX), G_j)
         end
 
@@ -107,9 +107,10 @@ function fit_irls(y, X, wts, probs, maxiter, tol)
     loss, B
 end
 
-function quadraticform!(result, Xt, W, X, XtW)
-    mul!(XtW,  Xt, W)
-    mul!(result, XtW, X)
+"Given matrices A, B and C, compute the matrix product ABC, obtaining AB in the process."
+function multiply_3_matrices!(ABC, AB, A, B, C)
+    mul!(AB, A, B)
+    mul!(ABC, AB, C)
 end
 
 function probs_minus_y!(probs, y)
@@ -204,7 +205,7 @@ function hessian!(H, X, wts, reg, probs, XtW, w)
             rows = (p*(i - 1) + 1):(p*i)
             cols = (p*(j - 1) + 1):(p*j)
             set_working_weights!(w, probs, wts, d, i+1, j+1)
-            quadraticform!(view(H, rows, cols), Xt, Diagonal(w), X, XtW)
+            multiply_3_matrices!(view(H, rows, cols), XtW, Xt, Diagonal(w), X)
         end
     end
     penalty_hessian!(H, reg)
