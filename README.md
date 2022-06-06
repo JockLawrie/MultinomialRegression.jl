@@ -38,13 +38,13 @@ B["(Intercept)", :]
 B[:, "virginica"]
 B[1, 2]  # Integer indices also work
 
-B2 = [18.858436609230726 12.997324400573637; -6.118961539544502 -4.079098098175112]
+B2 = [18.858251759055936 12.997166560384427; -6.118905216314177 -4.079050714520645]
 isapprox(B, B2; atol=1e-10)  # Reproducible result
 
 #=
   Regularized fit
-  Note: Standard errors not yet available because the current method requires that the 
-        parameters are maximum likelihood estimates, which regularized parameters usually aren't.
+  Note: Standard errors calculated from the hessian evaluated at the parameters.
+        Since the parameters of regularized models are not MLEs, the standard errors are approximate.
 =#
 model_L1    = fit(@formula(Species ~ 1 + SepalWidth), iris; reg=L1(0.5))
 model_L2    = fit(@formula(Species ~ 1 + SepalWidth), iris; reg=L2(0.5))
