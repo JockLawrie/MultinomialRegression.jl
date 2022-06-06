@@ -1,7 +1,7 @@
 name = "MultinomialRegression"
 uuid = "a592c9b7-6983-49e8-8273-c41e1cdef303"
 authors = ["jocklawrie <jock.lawrie@gmail.com>"]
-version = "0.3.2"
+version = "0.3.3"
 
 [deps]
 AxisArrays = "39de3d68-74b9-583c-8d2d-e117c070f3a9"
