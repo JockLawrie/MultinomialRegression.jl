@@ -33,11 +33,10 @@ end
 
 function optimise(y, X, wts, reg, solver, opts, probs)
     solver = select_solver(solver, reg, X)
-    Y      = construct_Y(y, size(probs)...)
-    solver == :LBFGS && return fit_lbfgs(y, X, wts, reg, probs, Y, opts)
+    solver == :LBFGS && return fit_lbfgs(y, X, wts, reg, probs, opts)
     maxiter = isnothing(opts) ? 250  : get(opts, "maxiter", 250)
-    tol     = isnothing(opts) ? 1e-6 : get(opts, "tol",     1e-6)
-    fit_irls(y, X, wts, probs, Y, maxiter, tol)
+    tol     = isnothing(opts) ? 1e-9 : get(opts, "tol",     1e-9)
+    fit_irls(y, X, wts, probs, maxiter, tol)
 end
 
 "Returns either :LBFGS or :IRLS."
@@ -47,24 +46,16 @@ function select_solver(solver, reg, X)
     :IRLS
 end
 
-function construct_Y(y, nobs, nclasses)
-    Y = fill(0.0, nobs, nclasses)
-    for (i, yi) in enumerate(y)
-        Y[i, yi] = 1.0
-    end
-    Y
-end
-
-function fit_lbfgs(y, X, wts, reg, probs, Y, opts)
+function fit_lbfgs(y, X, wts, reg, probs, opts)
+    k    = size(probs, 2)
     n, p = size(X)
-    k    = size(Y, 2)
     Xtw  = isnothing(wts) ? nothing : fill(0.0, p, n)
     fg! = (_, g, b) -> begin
         B = reshape(b, p, k - 1)
         G = reshape(g, p, k - 1)
         update_probs!(probs, B, X)
         loss = -loglikelihood(y, probs, wts) + penalty(reg, b)
-        gradient!(G, B, X, wts, reg, probs, Y, Xtw)
+        gradient!(G, B, X, wts, reg, probs, y, Xtw)  # Modifies probs
         loss
     end
     b0     = fill(0.0, p * (k - 1))
@@ -74,18 +65,17 @@ function fit_lbfgs(y, X, wts, reg, probs, Y, opts)
     loss, B
 end
 
-function fit_irls(y, X, wts, probs, Y, maxiter, tol)
+function fit_irls(y, X, wts, probs, maxiter, tol)
+    k     = size(probs, 2)
     n, p  = size(X)
-    k     = size(Y, 2)
     B     = fill(0.0, p, k - 1)
     dB    = fill(0.0, p, k - 1)  # Bnew = B + dB
-    w     = fill(0.0, n, k - 1)  # Working weights = wts .* p(1 - p)
+    W     = fill(0.0, n, k - 1)  # Working weights = wts .* p(1 - p)
     G     = fill(0.0, p, k - 1)  # G = gradient(-LL) = -gradient(LL) = Xt * (probs .- Y)
     Xt    = transpose(X)
-    Xtw   = fill(0.0, p, n)  # Xt * Diagonal(working weights)
-    XtwX  = fill(0.0, p, p)  # Xt * Diagonal(working weights) * X
+    XtW   = fill(0.0, p, n)  # Xt * Diagonal(working weights)
+    XtWX  = fill(0.0, p, p)  # Xt * Diagonal(working weights) * X
     probsview = view(probs, :, 2:k)
-    Yview     = view(Y, :, 2:k)
     converged = false
     loss_prev = Inf  # Required for the warning message if convergence is not achieved
     update_probs!(probs, B, X)
@@ -93,13 +83,12 @@ function fit_irls(y, X, wts, probs, Y, maxiter, tol)
     d = sqrt(eps())
     for iter = 1:maxiter
         # Update dB
-        set_working_weights!(w, probsview, wts, d)  # Set working weights = w = wts .* p_1mp
-        probsview .-= Yview
-        gradient!(G, Xt, probsview, wts, Xtw)  # gradient(-LL) = -gradient(LL)
+        set_working_weights!(W, probsview, wts, d)  # Set working weights = W = wts .* p .* (1 .- p)
+        probs_minus_y!(probs, y)
+        gradient!(G, Xt, probsview, wts, XtW)  # gradient(-LL) = -gradient(LL)
         for j = 2:k
-            mul!(Xtw,  Xt, Diagonal(view(w, :, j - 1)))
-            mul!(XtwX, Xtw, X)
-            ldiv!(view(dB, :, j - 1), cholesky!(Hermitian(XtwX)), view(G, :, j - 1))  # Or: ldiv!(dB_j, qr!(XtwX), G_j)
+            quadraticform!(XtWX, Xt, Diagonal(view(W, :, j - 1)), X, XtW)
+            ldiv!(view(dB, :, j - 1), cholesky!(Hermitian(XtWX)), view(G, :, j - 1))  # Or: ldiv!(dB_j, qr!(XtWX), G_j)
         end
 
         # Update B
@@ -111,15 +100,54 @@ function fit_irls(y, X, wts, probs, Y, maxiter, tol)
         loss = -loglikelihood(y, probs, wts)
 
         # Check for convergence
-        converged = isapprox(loss, loss_prev; rtol=tol) || iszero(loss_prev)
+        converged = isapprox(loss, loss_prev; atol=tol) || iszero(loss_prev)
         converged && break
     end
     !converged && @warn "IRLS did not converge with tolerance $(tol). The last change in loss was $(abs(loss - loss_prev))"
     loss, B
 end
 
-set_working_weights!(w, probs, wts::Nothing, d) = (w .=        max.(d, probs .* (1.0 .- probs)))
-set_working_weights!(w, probs, wts, d)          = (w .= wts .* max.(d, probs .* (1.0 .- probs)))
+function quadraticform!(result, Xt, W, X, XtW)
+    mul!(XtW,  Xt, W)
+    mul!(result, XtW, X)
+end
+
+function probs_minus_y!(probs, y)
+    for (i, yi) in enumerate(y)
+        probs[i, yi] -= 1.0
+    end
+end
+
+"w .= wts .* Pi .* (1 - Pi)"
+function set_working_weights!(w, probs, wts, d, i, j)
+    Pi = view(probs, :, i)
+    if i == j
+        w .= wts .* max.(d, Pi .* (1.0 .- Pi))
+    else
+        Pj = view(probs, :, j)
+        w .= -wts .* min.(d, Pi .* Pj)
+    end
+end
+
+function set_working_weights!(w, probs, wts::Nothing, d, i, j)
+    Pi = view(probs, :, i)
+    if i == j
+        w .= max.(d, Pi .* (1.0 .- Pi))
+    else
+        Pj = view(probs, :, j)
+        w .= min.(-d, -Pi .* Pj)
+    end
+end
+
+function set_working_weights!(W, probs, wts, d)
+    k = size(probs, 2)
+    for j = 1:k
+        set_working_weights!(view(W, :, j), probs, wts, d, j, j)
+    end
+end
+
+################################################################################
+# Loss, gradient, hessian
 
 loglikelihood(y, probs, w)          = @inbounds sum(w[i]*log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
 loglikelihood(y, probs, w::Nothing) = @inbounds sum(     log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
@@ -144,12 +172,9 @@ function softmax!(probs::AbstractVector)
 end
 
 "grad(-LL + penalty)"
-function gradient!(G, B, X, wts, reg, probs, Y, Xtw)
-    k  = size(Y, 2)
-    Y2 = view(Y, :, 2:k)
-    P2 = view(probs, :, 2:k)
-    P2 .-= Y2
-    gradient!(G, transpose(X), P2, wts, Xtw)
+function gradient!(G, B, X, wts, reg, probs, y, Xtw)
+    probs_minus_y!(probs, y)
+    gradient!(G, transpose(X), view(probs, :, 2:size(probs, 2)), wts, Xtw)
     penalty_gradient!(G, reg, B)
 end
 
@@ -169,38 +194,17 @@ Let k = the number of categories, and let p = the number of predictors.
 The hessian is a (k-1) x (k-1) block matrix, with block size p x p.
 In the code below, i and j denote the block indices; i.e., i and j each have k-1 values.
 """
-@views function hessian!(H, X, wts, reg, probs)
-    k  = size(probs, 2)  # nclasses
-    p  = size(X, 2)      # npredictors
+function hessian!(H, X, wts, reg, probs, XtW, w)
+    k  = size(probs, 2)
+    p  = size(X, 2)
     Xt = transpose(X)
+    d  = sqrt(eps())
     for j = 1:(k - 1)
         for i = j:(k - 1)
             rows = (p*(i - 1) + 1):(p*i)
             cols = (p*(j - 1) + 1):(p*j)
-            if i == j
-                H[rows, cols] = Xt * Diagonal(probs[:, i + 1] .* (1 .- probs[:, i + 1]) .* wts) * X
-            else
-                H[rows, cols] = Xt * Diagonal(-probs[:, i + 1] .* probs[:, j + 1] .* wts) * X
-            end
-        end
-    end
-    penalty_hessian!(H, reg)
-    Hermitian(H, :L)
-end
-
-@views function hessian!(H, X, wts::Nothing, reg, probs)
-    k  = size(probs, 2)  # nclasses
-    p  = size(X, 2)      # npredictors
-    Xt = transpose(X)
-    for j = 1:(k - 1)
-        for i = j:(k - 1)
-            rows = (p*(i - 1) + 1):(p*i)
-            cols = (p*(j - 1) + 1):(p*j)
-            if i == j
-                H[rows, cols] = Xt * Diagonal(probs[:, i + 1] .* (1 .- probs[:, i + 1])) * X
-            else
-                H[rows, cols] = Xt * Diagonal(-probs[:, i + 1] .* probs[:, j + 1]) * X
-            end
+            set_working_weights!(w, probs, wts, d, i+1, j+1)
+            quadraticform!(view(H, rows, cols), Xt, Diagonal(w), X, XtW)
         end
     end
     penalty_hessian!(H, reg)
@@ -208,10 +212,12 @@ end
 end
 
 function hessian(X, wts, reg, probs)
-    k = size(probs, 2)  # nclasses
-    p = size(X, 2)      # npredictors
-    H = fill(0.0, p*(k - 1), p*(k - 1))
-    hessian!(H, X, wts, reg, probs)
+    k    = size(probs, 2)
+    n, p = size(X)
+    H    = fill(0.0, p*(k - 1), p*(k - 1))
+    XtW  = fill(0.0, p, n)
+    w    = fill(0.0, n)
+    hessian!(H, X, wts, reg, probs, XtW, w)
 end
 
 end

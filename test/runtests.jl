@@ -7,6 +7,7 @@ using Logging
 using RDatasets
 using Statistics
 
+include("iris_binary.jl")
 include("iris.jl")
 include("alligators.jl")
 
