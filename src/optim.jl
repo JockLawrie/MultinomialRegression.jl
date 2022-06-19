@@ -126,7 +126,7 @@ function set_working_weights!(w, probs, wts, d, i, j)
         w .= wts .* max.(d, Pi .* (1.0 .- Pi))
     else
         Pj = view(probs, :, j)
-        w .= -wts .* min.(d, Pi .* Pj)
+        w .= wts .* min.(-d, -Pi .* Pj)
     end
 end
 
