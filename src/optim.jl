@@ -167,9 +167,17 @@ function rowwise_softmax!(eta::AbstractMatrix)
 end
 
 function softmax!(probs::AbstractVector)
-    max_bx = maximum(probs)
-    probs .= exp.(probs .- max_bx)  # Subtract max_bx first for numerical stability. Then prob[c] <= 1.
-    normalize!(probs, 1)
+    max_bx = -Inf
+    for x in probs
+        max_bx = x > max_bx ? x : max_bx
+    end
+    psum = 0.0
+    @inbounds for (i, x) in enumerate(probs)
+        probs[i] = exp(x - max_bx)
+        psum += probs[i]
+    end
+    denom = 1.0/psum
+    rmul!(probs, denom)
 end
 
 "grad(-LL + penalty)"
