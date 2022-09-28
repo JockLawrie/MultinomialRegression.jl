@@ -36,14 +36,14 @@ function optimise(y, X, wts, reg, solver, opts, probs)
     solver == :LBFGS && return fit_lbfgs(y, X, wts, reg, probs, opts)
     maxiter = isnothing(opts) ? 250  : get(opts, "maxiter", 250)
     tol     = isnothing(opts) ? 1e-9 : get(opts, "tol",     1e-9)
-    fit_irls(y, X, wts, probs, maxiter, tol)
+    fit_coordinatedescent(y, X, wts, probs, maxiter, tol)
 end
 
-"Returns either :LBFGS or :IRLS."
+"Returns either :LBFGS or :CoordinateDescent."
 function select_solver(solver, reg, X)
-    !isnothing(reg) && return :LBFGS  # Regularized models can't use IRLS
+    !isnothing(reg) && return :LBFGS  # Regularized models can't use IRLS/Coordinate Descent
     !isnothing(solver) && solver == :LBFGS && return :LBFGS  # If user specifies LBFGS then use it
-    :IRLS
+    :CoordinateDescent
 end
 
 function fit_lbfgs(y, X, wts, reg, probs, opts)
@@ -65,7 +65,7 @@ function fit_lbfgs(y, X, wts, reg, probs, opts)
     loss, B
 end
 
-function fit_irls(y, X, wts, probs, maxiter, tol)
+function fit_coordinatedescent(y, X, wts, probs, maxiter, tol)
     k     = size(probs, 2)
     n, p  = size(X)
     B     = fill(0.0, p, k - 1)
@@ -103,7 +103,7 @@ function fit_irls(y, X, wts, probs, maxiter, tol)
         converged = isapprox(loss, loss_prev; atol=tol) || iszero(loss_prev)
         converged && break
     end
-    !converged && @warn "IRLS did not converge with tolerance $(tol). The last change in loss was $(abs(loss - loss_prev))"
+    !converged && @warn "Coordinate Descent did not converge with tolerance $(tol). The last change in loss was $(abs(loss - loss_prev))"
     loss, B
 end
 
@@ -187,10 +187,10 @@ function gradient!(G, B, X, wts, reg, probs, y, Xtw)
     penalty_gradient!(G, reg, B)
 end
 
-# gradient(-LL) used in IRLS
+# gradient(-LL) used in Coordinate Descent
 gradient!(G, Xt, probs_minus_Y, wts::Nothing, Xtw) = mul!(G, Xt, probs_minus_Y)
 
-# gradient(-LL) used in IRLS
+# gradient(-LL) used in Coordinate Descent
 function gradient!(G, Xt, probs_minus_Y, wts, Xtw)
     mul!(Xtw, Xt, Diagonal(wts))
     mul!(G, Xtw, probs_minus_Y)
