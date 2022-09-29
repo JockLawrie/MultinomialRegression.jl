@@ -5,6 +5,7 @@ export MultinomialRegressionModel, @formula, fit, predict
 using CategoricalArrays
 using LinearAlgebra
 using StatsModels
+using Tables
 
 using ..regularization
 using ..optim
@@ -46,9 +47,14 @@ function fit(f::FormulaTerm, data; wts::Union{Nothing, AbstractVector}=nothing,
 end
 
 fit(y, X, wts=nothing, reg=nothing, solver=nothing, opts=nothing) = 
-    fit(y, X, wts, sort!(unique(y)), ["x$(i)" for i = 1:size(X, 2)], reg, solver, opts)
+    fit(y, X, sort!(unique(y)), ["x$(i)" for i = 1:size(X, 2)], wts, reg, solver, opts)
 
-predict(m::MultinomialRegressionModel, x) = _predict(m.coef, x)
+predict(m::MultinomialRegressionModel, x::AbstractVector) = _predict(m.coef, x)
+
+function predict(m::MultinomialRegressionModel, row)
+    x = [Tables.getcolumn(row, Symbol(xnm)) for xnm in m.xnames]
+    predict(m, x)
+end
 
 ################################################################################
 # Unexported
