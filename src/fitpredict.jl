@@ -1,6 +1,6 @@
 module fitpredict
 
-export MultinomialRegressionModel, @formula, fit, predict
+export MultinomialRegressionModel, @formula, fit, predict, predict!
 
 using CategoricalArrays
 using LinearAlgebra
@@ -10,15 +10,17 @@ using Tables
 using ..regularization
 using ..optim
 
+const FLOAT = typeof(0.0)
+
 struct MultinomialRegressionModel{T}
     yname::String
     ylevels::Vector{T}
     xnames::Vector{String}
-    coef::Matrix{Float64}
-    vcov::Matrix{Float64}
+    coef::Matrix{FLOAT}
+    vcov::Matrix{FLOAT}
     nobs::Int
-    loglikelihood::Float64
-    loss::Float64
+    loglikelihood::FLOAT
+    loss::FLOAT
 end
 
 """
@@ -30,8 +32,8 @@ function fit(y, X, yname::String, ylevels::AbstractVector, xnames::Vector{String
              reg::Union{Nothing, AbstractRegularizer}=nothing, solver=nothing, opts::Union{Nothing, T}=nothing) where{T}
     format_weights!(wts)
     loss, coef, vcov = fit_optim(y, X, wts, reg, solver, opts)
-    nobs = length(y)
-    LL   = penalty(reg, reshape(coef, length(coef))) - loss  # loss = -LL + penalty
+    nobs  = length(y)
+    LL    = penalty(reg, reshape(coef, length(coef))) - loss  # loss = -LL + penalty
     MultinomialRegressionModel(yname, ylevels, xnames, coef, vcov, nobs, LL, loss)
 end
 
@@ -49,7 +51,32 @@ end
 fit(y, X, wts=nothing, reg=nothing, solver=nothing, opts=nothing) = 
     fit(y, X, sort!(unique(y)), ["x$(i)" for i = 1:size(X, 2)], wts, reg, solver, opts)
 
-predict(m::MultinomialRegressionModel, x::AbstractVector) = _predict(m.coef, x)
+function predict!(probs, B::Matrix, x::AbstractVector)
+    probs[1] = 0.0
+    probs[2:end] .= reshape(x' * B, size(B, 2))
+    optim.softmax!(probs)
+    probs
+end
+
+predict!(probs, m::MultinomialRegressionModel, x::AbstractVector) = predict!(probs, m.coef, x)
+
+function predict!(probs, m::MultinomialRegressionModel, row)
+    x = [Tables.getcolumn(row, Symbol(xnm)) for xnm in m.xnames]
+    predict!(probs, m, x)
+end
+
+function predict!(probs, m::MultinomialRegressionModel, row, xworkspace)
+    for (j, xnm) in enumerate(m.xnames)
+        @inbounds xworkspace[j] = Tables.getcolumn(row, Symbol(xnm))
+    end
+    predict!(probs, m, xworkspace)
+end
+
+function predict(m::MultinomialRegressionModel, x::AbstractVector)
+    B = m.coef
+    probs = fill(0.0, 1 + size(B, 2)) # nclasses = 1 + size(B, 2)
+    predict!(probs, B, x)
+end
 
 function predict(m::MultinomialRegressionModel, row)
     x = [Tables.getcolumn(row, Symbol(xnm)) for xnm in m.xnames]
@@ -59,14 +86,6 @@ end
 ################################################################################
 # Unexported
 
-function _predict(B, x)
-    nclasses = 1 + size(B, 2)
-    probs    = fill(0.0, nclasses)
-    probs[2:end] .= reshape(x' * B, nclasses - 1)
-    optim.softmax!(probs)
-    probs
-end
-    
 "Construct categorical y and ylevels when the supplied y is not categorical."
 construct_y_and_ylevels(ydata::CategoricalVector) = ydata.refs, levels(ydata)
 
