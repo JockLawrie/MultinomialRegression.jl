@@ -9,8 +9,8 @@ using RDatasets
 iris = dataset("datasets", "iris")
 
 # Unregularized fit
-model = fit(@formula(Species ~ 1 + SepalWidth), iris)
-opts  = Dict(:iterations => 250, :f_abstol => 1e-9)  # Same terminology as Optim.Options
+model = fit(@formula(Species ~ 1 + SepalWidth), iris)  # levels(iris.Species)[1] is the reference category
+opts  = Dict(:iterations => 250, :f_abstol => 1e-9)    # Same terminology as Optim.Options
 model = fit(@formula(Species ~ 1 + SepalWidth), iris; opts=opts)
 
 # Predict

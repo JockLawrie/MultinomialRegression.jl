@@ -21,7 +21,7 @@ using .diagnostics                # Independent
 using .diagnostics_multinomial    # Depends on: fitpredict.MultinomialRegressionModel, diagnostics
 
 # MLJ interface
-include("MLJinterface.jl")
-using .MLJinterface
+#include("MLJinterface.jl")
+#using .MLJinterface
 
 end

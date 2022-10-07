@@ -7,36 +7,51 @@ using MLJBase
 using MLJModelInterface
 using Tables
 
+using ..regularization
 using ..fitpredict
 using ..diagnostics_multinomial
+
+import ..fitpredict.fit  # To be overloaded
 
 const MMI = MLJModelInterface
 
 mutable struct MultinomialLogisticRegressor <: MLJBase.Probabilistic
+    yname::String
+    xnames::Union{Nothing, Vector{String}}
+    wts::Union{Nothing, AbstractVector}
+    solver::Union{Nothing, Symbol}
+    reg::Union{Nothing, AbstractRegularizer}
+    opts::Dict{Symbol, Any}
 end
 
-function MMI.fit(model::MultinomialLogisticRegressor, verbosity, X, y)
-    ylevels   = MMI.classes(y[1])  # ylevels as a CategoricalVector
-    length(ylevels) < 2 && throw(DomainError("The response variable must have two or more levels."))
-    yint      = MMI.int(y)
+function MultinomialLogisticRegressor(; kwargs...)
+    yname  = get(kwargs, :yname,  "y")
+    xnames = get(kwargs, :xnames, nothing)
+    wts    = get(kwargs, :wts,    nothing)
+    solver = get(kwargs, :solver, nothing)
+    reg    = get(kwargs, :reg,    nothing)
+    opts   = get(kwargs, :opts,   Dict{Symbol, Any}())
+    MultinomialLogisticRegressor(yname, xnames, wts, solver, reg, opts)
+end
+
+function MMI.fit(m::MultinomialLogisticRegressor, verbosity, X, y)
     Xmatrix   = MMI.matrix(X)
-    sch       = MMI.schema(d)  # Table with colnames :names, :scitypes, :types
-    xnames    = isnothing(sch) ? nothing : [string(nm) for nm in sch.names]
-    model     = fitpredict.fit(yint, Xmatrix, "y", levels(ylevels), xnames)
-    fitresult = (model=model, ylevels=ylevels)
+    sch       = MMI.schema(X)  # Table with colnames :names, :scitypes, :types
+    xnames    = isnothing(sch) ? nothing : string.(sch.names)
+    xnames    = isnothing(xnames) ? m.xnames : xnames
+    fitresult = fitpredict.fit(y, Xmatrix; yname=m.yname, xnames=xnames, wts=m.wts, solver=m.solver, reg=m.reg, opts=m.opts)
     cache     = nothing
-    report    = (stderror=stderror(model), vcov=vcov(model), loglikelihood=loglikelihood(model))
+    report    = (stderror=stderror(fitted), vcov=vcov(fitted), loglikelihood=loglikelihood(fitted))
     return fitresult, cache, report
 end
 
 function MMI.predict(m::MultinomialLogisticRegressor, fitresult, Xnew)
     n      = MMI.nrows(Xnew)
-    model  = fitresult.model
-    B      = model.coef
+    B      = fitresult.coef
     nx     = size(B, 1)
     x      = fill(0.0, nx)
     probs  = Vector{Vector{typeof(0.0)}}(undef, n)
-    xnames = Symbol.(model.xnames)
+    xnames = Symbol.(fitresult.xnames)
     rows   = Tables.rows(Xnew)
     for (i, row) in enumerate(rows)
         for (j, xnm) in enumerate(xnames)

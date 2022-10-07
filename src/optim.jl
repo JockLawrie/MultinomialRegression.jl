@@ -64,6 +64,7 @@ end
 override_default_options(default_opts, opts::Nothing) = default_opts
 
 function override_default_options(default_opts, opts)
+    isempty(opts) && return default_opts
     opts2 = Dict{Symbol, valtype(opts)}(Symbol(k) => v for (k, v) in opts)
     merge!(default_opts, opts2)
 end
