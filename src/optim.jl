@@ -91,13 +91,23 @@ function fit_coordinatedescent(y, X, wts, probs, maxiter, tol)
             ldiv!(view(dB, :, j - 1), cholesky!(Hermitian(XtWX)), view(G, :, j - 1))  # Or: ldiv!(dB_j, qr!(XtWX), G_j)
         end
 
-        # Update B
-        B .-= dB  # The minus is due to the negative gradient used to obtain dB
-
-        # Update loss
+        # Line search along dB
+        a = 1.0
         loss_prev = loss
-        update_probs!(probs, B, X)
-        loss = -loglikelihood(y, probs, wts)
+        for i_linesearch = 1:52  # eps() == 1 / (2^52)
+            # Update B
+            if i_linesearch == 1
+                B .-= a .* dB  # The minus is due to the negative gradient used to obtain dB
+            else
+                B .+= a .* dB  # B = B + a_old*dB - a_new*dB = B + a_new*dB, since a_old = 2*a_new
+            end
+
+            # Update loss
+            update_probs!(probs, B, X)
+            loss = -loglikelihood(y, probs, wts)
+            loss < loss_prev && break
+            a *= 0.5  # Smaller step size
+        end
 
         # Check for convergence
         converged = isapprox(loss, loss_prev; atol=tol) || iszero(loss_prev)

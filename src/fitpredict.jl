@@ -49,7 +49,7 @@ function fit(f::FormulaTerm, data; wts::Union{Nothing, AbstractVector}=nothing,
 end
 
 fit(y, X, wts=nothing, reg=nothing, solver=nothing, opts=nothing) = 
-    fit(y, X, sort!(unique(y)), ["x$(i)" for i = 1:size(X, 2)], wts, reg, solver, opts)
+    fit(y, X, "y", sort!(unique(y)), ["x$(i)" for i = 1:size(X, 2)], wts, reg, solver, opts)
 
 function predict!(probs, B::Matrix, x::AbstractVector)
     probs[1] = 0.0
