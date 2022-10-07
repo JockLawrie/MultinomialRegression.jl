@@ -1,6 +1,7 @@
 using Test
 using MultinomialRegression
 
+using CategoricalArrays
 using DataFrames
 using Dates
 using Logging

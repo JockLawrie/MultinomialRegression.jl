@@ -1,6 +1,6 @@
 module MultinomialRegression
 
-export MultinomialRegressionModel, @formula, fit, predict,  # Fit/predict
+export MultinomialRegressionModel, @formula, fit, predict, predict!,  # Fit/predict
        L1, L2, ElasticNet,                                  # Regularization
        nparams, coef, stderror, coeftable, coefcor, vcov,   # Coefficient diagnostics
        isregularized, nobs, loglikelihood, aic, aicc, bic,  # Model diagnostics

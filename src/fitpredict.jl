@@ -25,11 +25,15 @@ end
 
 """
 Assumptions:
-1. y has categories numbered 1 to nclasses.
-2. The first category is the reference category.
+1. The first category of the response variable is the reference category.
+2. X is a Matrix{typeof(0.0)}.
 """
-function fit(y, X, yname::String, ylevels::AbstractVector, xnames::Vector{String}, wts::Union{Nothing, AbstractVector}=nothing,
-             reg::Union{Nothing, AbstractRegularizer}=nothing, solver=nothing, opts::Union{Nothing, T}=nothing) where{T}
+function fit(y::AbstractVector, X::AbstractMatrix{<: Real};
+             yname::String="y", xnames::Union{Nothing, Vector{String}}=nothing,
+             wts::Union{Nothing, AbstractVector}=nothing, solver=nothing,
+             reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, AbstractDict}=nothing)
+    y, ylevels = construct_y_and_ylevels(y)
+    xnames = isnothing(xnames) ? ["x$(i)" for i = 1:size(X, 2)] : xnames
     format_weights!(wts)
     loss, coef, vcov = fit_optim(y, X, wts, reg, solver, opts)
     nobs  = length(y)
@@ -37,19 +41,16 @@ function fit(y, X, yname::String, ylevels::AbstractVector, xnames::Vector{String
     MultinomialRegressionModel(yname, ylevels, xnames, coef, vcov, nobs, LL, loss)
 end
 
-function fit(f::FormulaTerm, data; wts::Union{Nothing, AbstractVector}=nothing,
-             reg::Union{Nothing, AbstractRegularizer}=nothing, solver=nothing, opts::Union{Nothing, T}=nothing) where{T}
+function fit(f::FormulaTerm, data; kwargs...)
     yname  = string(f.lhs.sym)
-    y, ylevels = construct_y_and_ylevels(data[!, yname])
     f      = apply_schema(f, schema(f, data))
     c      = coefnames(f)  # (names(y), names(x))
     xnames = c[2] isa String ? [c[2]] : c[2]
-    X      = modelmatrix(f, data)  # Matrix{Float64}
-    fit(y, X, yname, ylevels, xnames, wts, reg, solver, opts)
+    kwargs = update_kwargs(kwargs, :yname => yname, :xnames => xnames)
+    y = data[!, yname]
+    X = modelmatrix(f, data)  # Matrix{Float64}
+    fit(y, X; kwargs...)
 end
-
-fit(y, X, wts=nothing, reg=nothing, solver=nothing, opts=nothing) = 
-    fit(y, X, "y", sort!(unique(y)), ["x$(i)" for i = 1:size(X, 2)], wts, reg, solver, opts)
 
 function predict!(probs, B::Matrix, x::AbstractVector)
     probs[1] = 0.0
@@ -85,6 +86,19 @@ end
 
 ################################################################################
 # Unexported
+
+update_kwargs(kwargs::Nothing, ps...) = Dict(p[1] => p[2] for p in ps)
+
+function update_kwargs(kwargs, ps...)
+    result = Dict{Symbol, Any}()
+    for (k, v) in kwargs
+        result[k] = v
+    end
+    for p in ps
+        result[p[1]] = p[2]
+    end
+    result
+end
 
 "Construct categorical y and ylevels when the supplied y is not categorical."
 construct_y_and_ylevels(ydata::CategoricalVector) = ydata.refs, levels(ydata)

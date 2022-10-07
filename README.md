@@ -10,10 +10,14 @@ iris = dataset("datasets", "iris")
 
 # Unregularized fit
 model = fit(@formula(Species ~ 1 + SepalWidth), iris)
+opts  = Dict(:iterations => 250, :f_abstol => 1e-9)  # Same terminology as Optim.Options
+model = fit(@formula(Species ~ 1 + SepalWidth), iris; opts=opts)
 
 # Predict
-xnew = [1.0, iris.SepalWidth[1]]
-pred = predict(model, xnew)
+xnew  = [1.0, iris.SepalWidth[1]]
+pred  = predict(model, xnew)
+pred2 = zeros(3)
+predict!(pred2, model, xnew)
 
 # Model-level diagnostics
 isregularized(model)
@@ -26,8 +30,8 @@ bic(model)
 # Coefficient-level diagnostics
 nparams(model)
 coef(model)
-stderror(model)
 coeftable(model)
+stderror(model)
 vcov(model)
 coefcor(model)
 

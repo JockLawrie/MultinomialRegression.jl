@@ -93,15 +93,13 @@ data.oklawaha  = [x == "oklawaha" ? 1.0 : 0.0 for x in data.Lake]
 data.trafford  = [x == "trafford" ? 1.0 : 0.0 for x in data.Lake]
 
 # Construct training data
-yname   = "StomachContents"
-ylevels = ["Fish", "Bird", "Invertebrate", "Reptile", "Other"]
-xnames  = ["intercept", "george", "oklawaha", "trafford", "large", "male"]
-ylevels_dict = Dict(ylevel => i for (i, ylevel) in enumerate(ylevels))
-y = [ylevels_dict[x] for x in data.StomachContents]
+yname  = "StomachContents"
+xnames = ["intercept", "george", "oklawaha", "trafford", "large", "male"]
+y = categorical(data.StomachContents; levels=["Fish", "Bird", "Invertebrate", "Reptile", "Other"])
 X = Matrix(data[:, xnames])
 
 # Train
-model = fit(y, X, yname, ylevels, xnames)
+model = fit(y, X; yname=yname, xnames=xnames)
 
 # Assess fitted parameters and standard errors
 target_params   = transpose(reshape(target[:, 2], 4, 6))

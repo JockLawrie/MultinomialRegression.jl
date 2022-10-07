@@ -29,22 +29,47 @@ function fit_optim(y, X, wts::Union{Nothing, AbstractVector}=nothing, reg::Union
 end
 
 ################################################################################
-# Unexported
+# Parse the configuration
 
 function optimise(y, X, wts, reg, solver, opts, probs)
-    solver = select_solver(solver, reg, X)
-    solver == :LBFGS && return fit_lbfgs(y, X, wts, reg, probs, opts)
-    maxiter = isnothing(opts) ? 250  : get(opts, "maxiter", 250)
-    tol     = isnothing(opts) ? 1e-9 : get(opts, "tol",     1e-9)
-    fit_coordinatedescent(y, X, wts, probs, maxiter, tol)
+    solver = select_solver(solver, reg)
+    d_opts = default_options(solver)
+    opts   = override_default_options(d_opts, opts)  # User-specified options override default options
+    opts   = Optim.Options(; opts...)
+    if solver == :LBFGS
+        fit_lbfgs(y, X, wts, reg, probs, opts)
+    else
+        fit_coordinatedescent(y, X, wts, probs, opts.iterations, opts.f_abstol)
+    end
 end
 
 "Returns either :LBFGS or :CoordinateDescent."
-function select_solver(solver, reg, X)
+function select_solver(solver, reg)
     !isnothing(reg) && return :LBFGS  # Regularized models can't use IRLS/Coordinate Descent
     !isnothing(solver) && solver == :LBFGS && return :LBFGS  # If user specifies LBFGS then use it
     :CoordinateDescent
 end
+
+function default_options(solver)
+    if solver == :LBFGS
+        Dict{Symbol, Union{Nothing, Real}}()
+    elseif solver == :CoordinateDescent
+        Dict(:iterations => 250, :f_abstol => 1e-9)
+    else
+        error("Solver $(solver) does not have default options")
+    end
+end
+
+"Override default options with user-specified options"
+override_default_options(default_opts, opts::Nothing) = default_opts
+
+function override_default_options(default_opts, opts)
+    opts2 = Dict{Symbol, valtype(opts)}(Symbol(k) => v for (k, v) in opts)
+    merge!(default_opts, opts2)
+end
+
+################################################################################
+# Solve with LBFGS
 
 function fit_lbfgs(y, X, wts, reg, probs, opts)
     k    = size(probs, 2)
@@ -65,7 +90,10 @@ function fit_lbfgs(y, X, wts, reg, probs, opts)
     loss, B
 end
 
-function fit_coordinatedescent(y, X, wts, probs, maxiter, tol)
+################################################################################
+# Solve with Coordinate Descent
+
+function fit_coordinatedescent(y, X, wts, probs, iterations, f_tol)
     k     = size(probs, 2)
     n, p  = size(X)
     B     = fill(0.0, p, k - 1)
@@ -81,7 +109,7 @@ function fit_coordinatedescent(y, X, wts, probs, maxiter, tol)
     update_probs!(probs, B, X)
     loss = -loglikelihood(y, probs, wts)
     d = sqrt(eps())
-    for iter = 1:maxiter
+    for iter = 1:iterations
         # Update dB
         set_working_weights!(W, probsview, wts, d)  # Set working weights = W = wts .* p .* (1 .- p)
         probs_minus_y!(probs, y)
@@ -110,10 +138,10 @@ function fit_coordinatedescent(y, X, wts, probs, maxiter, tol)
         end
 
         # Check for convergence
-        converged = isapprox(loss, loss_prev; atol=tol) || iszero(loss_prev)
+        converged = isapprox(loss, loss_prev; atol=f_tol) || iszero(loss_prev)
         converged && break
     end
-    !converged && @warn "Coordinate Descent did not converge with tolerance $(tol). The last change in loss was $(abs(loss - loss_prev))"
+    !converged && @warn "Coordinate Descent did not converge with tolerance $(f_tol). The last change in loss was $(abs(loss - loss_prev))"
     loss, B
 end
 
