@@ -76,7 +76,9 @@ end
 ################################################################################
 # Supporting functions to be used in type-specific code
 
-_isregularized(loglikelihood, loss) = loss != -loglikelihood  # loss == -LL + penalty
+_penalty(loss, loglikelihood, n) = abs(loss + loglikelihood/n)  # loss = -LL/n + penalty
+
+_isregularized(loss, loglikelihood, n) = _penalty(loss, loglikelihood, n) > 1e-10  # penalty > 0
 
 _nparams(prms...) = sum(length(p) for p in prms)
 

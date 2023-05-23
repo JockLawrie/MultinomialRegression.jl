@@ -8,7 +8,7 @@ using StatsModels
 using Tables
 
 using ..regularization
-using ..optim
+using ..coordinate_descent
 
 const FLOAT = typeof(0.0)
 
@@ -30,15 +30,16 @@ Assumptions:
 """
 function fit(y::AbstractVector, X::AbstractMatrix{<: Real};
              yname::String="y", xnames::Union{Nothing, Vector{String}}=nothing,
-             wts::Union{Nothing, AbstractVector}=nothing, solver=nothing,
-             reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, AbstractDict}=nothing)
+             wts::Union{Nothing, AbstractVector}=nothing,
+             reg=nothing, opts::Union{Nothing, AbstractDict}=nothing)
     y, ylevels = construct_y_and_ylevels(y)
     length(ylevels) < 2 && throw(DomainError("The response variable must have at least two levels."))
     xnames = isnothing(xnames) ? ["x$(i)" for i = 1:size(X, 2)] : xnames
+    reg    = construct_regularizer(reg)
     format_weights!(wts)
-    loss, coef, vcov = fit_optim(y, X, wts, reg, solver, opts)
-    nobs  = length(y)
-    LL    = penalty(reg, reshape(coef, length(coef))) - loss  # loss = -LL + penalty
+    loss, coef, vcov = coordinatedescent(y, X, wts, reg, opts)
+    nobs = length(y)
+    LL   = nobs * (penalty(reg, coef) - loss)  # loss = -LL/n + penalty
     MultinomialRegressionModel(yname, ylevels, xnames, coef, vcov, nobs, LL, loss)
 end
 
@@ -56,7 +57,7 @@ end
 function predict!(probs, B::Matrix, x::AbstractVector)
     probs[1] = 0.0
     probs[2:end] .= reshape(x' * B, size(B, 2))
-    optim.softmax!(probs)
+    coordinate_descent.softmax!(probs)
     probs
 end
 
@@ -88,19 +89,6 @@ end
 ################################################################################
 # Unexported
 
-update_kwargs(kwargs::Nothing, ps...) = Dict(p[1] => p[2] for p in ps)
-
-function update_kwargs(kwargs, ps...)
-    result = Dict{Symbol, Any}()
-    for (k, v) in kwargs
-        result[k] = v
-    end
-    for p in ps
-        result[p[1]] = p[2]
-    end
-    result
-end
-
 "Construct categorical y and ylevels when the supplied y is not categorical."
 construct_y_and_ylevels(ydata::CategoricalVector) = ydata.refs, levels(ydata)
 
@@ -109,6 +97,12 @@ function construct_y_and_ylevels(ydata::AbstractVector)
     ycatvec = categorical(ydata; levels=yvals)
     ycatvec.refs, levels(ycatvec)
 end
+
+construct_regularizer(reg::Nothing) = nothing
+construct_regularizer(reg::ElasticNet) = reg
+construct_regularizer(reg::Tuple{T,T}) where {T <: Real} = ElasticNet(reg[1], reg[2])
+construct_regularizer(reg::Dict) = ElasticNet(reg[:lambda], reg[:alpha])
+construct_regularizer(reg::NamedTuple) = ElasticNet(reg.lambda, reg.alpha)
 
 """
 Ensure that:
@@ -129,6 +123,19 @@ function format_weights!(wts)
     m = n / s
     wts .*= m
     nothing
+end
+
+update_kwargs(kwargs::Nothing, ps...) = Dict(p[1] => p[2] for p in ps)
+
+function update_kwargs(kwargs, ps...)
+    result = Dict{Symbol, Any}()
+    for (k, v) in kwargs
+        result[k] = v
+    end
+    for p in ps
+        result[p[1]] = p[2]
+    end
+    result
 end
 
 end

@@ -1,17 +1,17 @@
 module MultinomialRegression
 
 export MultinomialRegressionModel, @formula, fit, predict, predict!,  # Fit/predict
-       L1, L2, ElasticNet,                                 # Regularization
+       ElasticNet,                                         # Regularization
        nparams, coef, stderror, coeftable, coefcor, vcov,  # Coefficient diagnostics
        isregularized, nobs, loglikelihood, aic, aicc, bic  # Model diagnostics
 
 # Fit/predict
 include("regularization.jl")
-include("optim.jl")
+include("coordinate_descent.jl")
 include("fitpredict.jl")
-using .regularization  # Independent
-using .optim           # Depends on: regularization
-using .fitpredict      # Depends on: regularization
+using .regularization      # Independent
+using .coordinate_descent  # Depends on: regularization
+using .fitpredict          # Depends on: regularization, coordinate_descent
 
 # Diagnostics
 include("diagnostics.jl")
