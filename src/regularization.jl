@@ -6,7 +6,7 @@ import LinearAlgebra: norm
 
 abstract type AbstractRegularizer end
 
-penalty(reg, theta) = 0.0
+penalty(reg, B) = 0.0
 penalty_gradient!(gradB, reg, B) = nothing
 penalty_hessian!(H, reg) = nothing
 

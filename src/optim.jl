@@ -39,7 +39,7 @@ function optimise(y, X, wts, reg, solver, opts, probs)
     if solver == :LBFGS
         fit_lbfgs(y, X, wts, reg, probs, opts)
     else
-        fit_coordinatedescent(y, X, wts, probs, opts.iterations, opts.f_abstol)
+        fit_coordinatedescent(y, X, wts, reg, probs, opts.iterations, opts.f_abstol)
     end
 end
 
@@ -79,8 +79,7 @@ function fit_lbfgs(y, X, wts, reg, probs, opts)
     fg! = (_, g, b) -> begin
         B = reshape(b, p, k - 1)
         G = reshape(g, p, k - 1)
-        update_probs!(probs, B, X)
-        loss = -loglikelihood(y, probs, wts) + penalty(reg, b)
+        loss = loss!(y, X, wts, reg, B, probs)
         gradient!(G, y, X, wts, reg, B, probs, Xtw)  # Modifies probs
         loss
     end
@@ -94,12 +93,12 @@ end
 ################################################################################
 # Solve with Coordinate Descent
 
-function fit_coordinatedescent(y, X, wts, probs, iterations, f_tol)
+function fit_coordinatedescent(y, X, wts, reg, probs, iterations, f_tol)
     k     = size(probs, 2)
     n, p  = size(X)
     B     = fill(0.0, p, k - 1)
     dB    = fill(0.0, p, k - 1)  # Bnew = B + dB
-    W     = fill(0.0, n, k - 1)  # Working weights = wts .* p(1 - p)
+    W     = fill(0.0, n, k - 1)  # Working weights = W = wts .* p .* (1 .- p)
     G     = fill(0.0, p, k - 1)  # G = gradient(-LL) = -gradient(LL) = Xt * (probs .- Y)
     Xt    = transpose(X)
     Xtw   = isnothing(wts) ? transpose(X) : transpose(X)*Diagonal(wts)
@@ -108,16 +107,15 @@ function fit_coordinatedescent(y, X, wts, probs, iterations, f_tol)
     probsview = view(probs, :, 2:k)
     converged = false
     loss_prev = Inf  # Required for the warning message if convergence is not achieved
-    update_probs!(probs, B, X)
-    loss = -loglikelihood(y, probs, wts)
+    loss = loss!(y, X, wts, reg, B, probs)
     d = sqrt(eps())
     for iter = 1:iterations
         # Update dB
-        set_working_weights!(W, probsview, wts, d)  # Set working weights = W = wts .* p .* (1 .- p)
-        reg = nothing
+        set_working_weights!(W, wts, probsview, d)   # Called before gradient because gradient modifies probs
         gradient!(G, y, X, wts, reg, B, probs, Xtw)  # Modifies probs -> probs .- Y
         for j = 2:k
             multiply_3_matrices!(XtWX, XtW, Xt, Diagonal(view(W, :, j - 1)), X)
+            penalty_hessian!(XtWX, reg)
             ldiv!(view(dB, :, j - 1), cholesky!(Hermitian(XtWX)), view(G, :, j - 1))  # Or: ldiv!(dB_j, qr!(XtWX), G_j)
         end
 
@@ -133,8 +131,7 @@ function fit_coordinatedescent(y, X, wts, probs, iterations, f_tol)
             end
 
             # Update loss
-            update_probs!(probs, B, X)
-            loss = -loglikelihood(y, probs, wts)
+            loss = loss!(y, X, wts, reg, B, probs)
             loss < loss_prev && break
             a *= 0.5  # Smaller step size
         end
@@ -147,42 +144,14 @@ function fit_coordinatedescent(y, X, wts, probs, iterations, f_tol)
     loss, B
 end
 
-"Given matrices A, B and C, compute the matrix product ABC, obtaining AB in the process."
-function multiply_3_matrices!(ABC, AB, A, B, C)
-    mul!(AB, A, B)
-    mul!(ABC, AB, C)
-end
-
-"w .= wts .* Pi .* (1 - Pi)"
-function set_working_weights!(w, probs, wts, d, i, j)
-    Pi = view(probs, :, i)
-    if i == j
-        w .= wts .* max.(d, Pi .* (1.0 .- Pi))
-    else
-        Pj = view(probs, :, j)
-        w .= wts .* min.(-d, -Pi .* Pj)
-    end
-end
-
-function set_working_weights!(w, probs, wts::Nothing, d, i, j)
-    Pi = view(probs, :, i)
-    if i == j
-        w .= max.(d, Pi .* (1.0 .- Pi))
-    else
-        Pj = view(probs, :, j)
-        w .= min.(-d, -Pi .* Pj)
-    end
-end
-
-function set_working_weights!(W, probs, wts, d)
-    k = size(probs, 2)
-    for j = 1:k
-        set_working_weights!(view(W, :, j), probs, wts, d, j, j)
-    end
-end
-
 ################################################################################
-# Loss, gradient, hessian
+# Loss function: loss = -loglikelihood + penalty
+
+"Modifies (updates) probs"
+function loss!(y, X, wts, reg, B, probs)
+    update_probs!(probs, B, X)
+    -loglikelihood(y, probs, wts) + penalty(reg, B)
+end
 
 loglikelihood(y, probs, w)          = @inbounds sum(w[i]*log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
 loglikelihood(y, probs, w::Nothing) = @inbounds sum(     log(max(probs[i, yi], 1e-12)) for (i, yi) in enumerate(y))
@@ -214,6 +183,9 @@ function softmax!(probs::AbstractVector)
     rmul!(probs, denom)
 end
 
+################################################################################
+# Gradient
+
 "grad(-LL + penalty)"
 function gradient!(G, y, X, wts, reg, B, probs, Xtw)
     for (i, yi) in enumerate(y)  # probs -> probs .- Y
@@ -222,6 +194,9 @@ function gradient!(G, y, X, wts, reg, B, probs, Xtw)
     mul!(G, Xtw, view(probs, :, 2:size(probs, 2)))
     penalty_gradient!(G, reg, B)
 end
+
+################################################################################
+# Hessian
 
 """
 hessian(-LL + penalty)
@@ -239,7 +214,7 @@ function hessian!(H, X, wts, reg, probs, XtW, w)
         for i = j:(k - 1)
             rows = (p*(i - 1) + 1):(p*i)
             cols = (p*(j - 1) + 1):(p*j)
-            set_working_weights!(w, probs, wts, d, i+1, j+1)
+            set_working_weights!(w, wts, probs, d, i+1, j+1)
             multiply_3_matrices!(view(H, rows, cols), XtW, Xt, Diagonal(w), X)
         end
     end
@@ -254,6 +229,41 @@ function hessian(X, wts, reg, probs)
     XtW  = fill(0.0, p, n)
     w    = fill(0.0, n)
     hessian!(H, X, wts, reg, probs, XtW, w)
+end
+
+
+"Given matrices A, B and C, compute the matrix product ABC, obtaining AB in the process."
+function multiply_3_matrices!(ABC, AB, A, B, C)
+    mul!(AB, A, B)
+    mul!(ABC, AB, C)
+end
+
+"w .= wts .* Pi .* (delta_ij - Pj)"
+function set_working_weights!(w, wts, probs, d, i, j)
+    Pi = view(probs, :, i)
+    if i == j
+        w .= wts .* max.(d, Pi .* (1.0 .- Pi))
+    else
+        Pj = view(probs, :, j)
+        w .= wts .* min.(-d, -Pi .* Pj)
+    end
+end
+
+function set_working_weights!(w, wts::Nothing, probs, d, i, j)
+    Pi = view(probs, :, i)
+    if i == j
+        w .= max.(d, Pi .* (1.0 .- Pi))
+    else
+        Pj = view(probs, :, j)
+        w .= min.(-d, -Pi .* Pj)
+    end
+end
+
+function set_working_weights!(W, wts, probs, d)
+    k = size(probs, 2)
+    for j = 1:k
+        set_working_weights!(view(W, :, j), wts, probs, d, j, j)
+    end
 end
 
 end
