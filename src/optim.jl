@@ -75,13 +75,13 @@ end
 function fit_lbfgs(y, X, wts, reg, probs, opts)
     k    = size(probs, 2)
     n, p = size(X)
-    Xtw  = isnothing(wts) ? nothing : fill(0.0, p, n)
+    Xtw  = isnothing(wts) ? transpose(X) : transpose(X)*Diagonal(wts)
     fg! = (_, g, b) -> begin
         B = reshape(b, p, k - 1)
         G = reshape(g, p, k - 1)
         update_probs!(probs, B, X)
         loss = -loglikelihood(y, probs, wts) + penalty(reg, b)
-        gradient!(G, B, X, wts, reg, probs, y, Xtw)  # Modifies probs
+        gradient!(G, y, X, wts, reg, B, probs, Xtw)  # Modifies probs
         loss
     end
     b0     = fill(0.0, p * (k - 1))
@@ -102,6 +102,7 @@ function fit_coordinatedescent(y, X, wts, probs, iterations, f_tol)
     W     = fill(0.0, n, k - 1)  # Working weights = wts .* p(1 - p)
     G     = fill(0.0, p, k - 1)  # G = gradient(-LL) = -gradient(LL) = Xt * (probs .- Y)
     Xt    = transpose(X)
+    Xtw   = isnothing(wts) ? transpose(X) : transpose(X)*Diagonal(wts)
     XtW   = fill(0.0, p, n)  # Xt * Diagonal(working weights)
     XtWX  = fill(0.0, p, p)  # Xt * Diagonal(working weights) * X
     probsview = view(probs, :, 2:k)
@@ -113,8 +114,8 @@ function fit_coordinatedescent(y, X, wts, probs, iterations, f_tol)
     for iter = 1:iterations
         # Update dB
         set_working_weights!(W, probsview, wts, d)  # Set working weights = W = wts .* p .* (1 .- p)
-        probs_minus_y!(probs, y)
-        gradient!(G, Xt, probsview, wts, XtW)  # gradient(-LL) = -gradient(LL)
+        reg = nothing
+        gradient!(G, y, X, wts, reg, B, probs, Xtw)  # Modifies probs -> probs .- Y
         for j = 2:k
             multiply_3_matrices!(XtWX, XtW, Xt, Diagonal(view(W, :, j - 1)), X)
             ldiv!(view(dB, :, j - 1), cholesky!(Hermitian(XtWX)), view(G, :, j - 1))  # Or: ldiv!(dB_j, qr!(XtWX), G_j)
@@ -150,12 +151,6 @@ end
 function multiply_3_matrices!(ABC, AB, A, B, C)
     mul!(AB, A, B)
     mul!(ABC, AB, C)
-end
-
-function probs_minus_y!(probs, y)
-    for (i, yi) in enumerate(y)
-        probs[i, yi] -= 1.0
-    end
 end
 
 "w .= wts .* Pi .* (1 - Pi)"
@@ -220,19 +215,12 @@ function softmax!(probs::AbstractVector)
 end
 
 "grad(-LL + penalty)"
-function gradient!(G, B, X, wts, reg, probs, y, Xtw)
-    probs_minus_y!(probs, y)
-    gradient!(G, transpose(X), view(probs, :, 2:size(probs, 2)), wts, Xtw)
+function gradient!(G, y, X, wts, reg, B, probs, Xtw)
+    for (i, yi) in enumerate(y)  # probs -> probs .- Y
+        probs[i, yi] -= 1.0
+    end
+    mul!(G, Xtw, view(probs, :, 2:size(probs, 2)))
     penalty_gradient!(G, reg, B)
-end
-
-# gradient(-LL) used in Coordinate Descent
-gradient!(G, Xt, probs_minus_Y, wts::Nothing, Xtw) = mul!(G, Xt, probs_minus_Y)
-
-# gradient(-LL) used in Coordinate Descent
-function gradient!(G, Xt, probs_minus_Y, wts, Xtw)
-    mul!(Xtw, Xt, Diagonal(wts))
-    mul!(G, Xtw, probs_minus_Y)
 end
 
 """
