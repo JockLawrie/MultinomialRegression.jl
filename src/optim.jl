@@ -76,11 +76,12 @@ function fit_lbfgs(y, X, wts, reg, probs, opts)
     k    = size(probs, 2)
     n, p = size(X)
     Xtw  = isnothing(wts) ? transpose(X) : transpose(X)*Diagonal(wts)
+    XtwY = construct_XtwY(Xtw, y, k-1)
     fg! = (_, g, b) -> begin
         B = reshape(b, p, k - 1)
         G = reshape(g, p, k - 1)
         loss = loss!(y, X, wts, reg, B, probs)
-        gradient!(G, y, X, wts, reg, B, probs, Xtw)  # Modifies probs
+        gradient!(G, y, X, wts, reg, B, probs, Xtw, XtwY)  # Modifies probs
         loss
     end
     b0     = fill(0.0, p * (k - 1))
@@ -94,16 +95,17 @@ end
 # Solve with Coordinate Descent
 
 function fit_coordinatedescent(y, X, wts, reg, probs, iterations, f_tol)
-    k     = size(probs, 2)
-    n, p  = size(X)
-    B     = fill(0.0, p, k - 1)
-    dB    = fill(0.0, p, k - 1)  # Bnew = B + dB
-    W     = fill(0.0, n, k - 1)  # Working weights = W = wts .* p .* (1 .- p)
-    G     = fill(0.0, p, k - 1)  # G = gradient(-LL) = -gradient(LL) = Xt * (probs .- Y)
-    Xt    = transpose(X)
-    Xtw   = isnothing(wts) ? transpose(X) : transpose(X)*Diagonal(wts)
-    XtW   = fill(0.0, p, n)  # Xt * Diagonal(working weights)
-    XtWX  = fill(0.0, p, p)  # Xt * Diagonal(working weights) * X
+    k    = size(probs, 2)
+    n, p = size(X)
+    B    = fill(0.0, p, k - 1)
+    dB   = fill(0.0, p, k - 1)  # Bnew = B + dB
+    W    = fill(0.0, n, k - 1)  # Working weights = W = wts .* p .* (1 .- p)
+    G    = fill(0.0, p, k - 1)  # G = gradient(-LL) = -gradient(LL) = Xt * diag(wts) * (probs .- Y)
+    Xt   = transpose(X)
+    Xtw  = isnothing(wts) ? transpose(X) : transpose(X)*Diagonal(wts)
+    XtwY = construct_XtwY(Xtw, y, k-1)  # Xt*diag(wts)*Y (because G = Xtw*probs .- XtwY)
+    XtW  = fill(0.0, p, n)  # Xt * Diagonal(working weights)
+    XtWX = fill(0.0, p, p)  # Xt * Diagonal(working weights) * X
     probsview = view(probs, :, 2:k)
     converged = false
     loss_prev = Inf  # Required for the warning message if convergence is not achieved
@@ -111,11 +113,14 @@ function fit_coordinatedescent(y, X, wts, reg, probs, iterations, f_tol)
     d = sqrt(eps())
     for iter = 1:iterations
         # Update dB
-        set_working_weights!(W, wts, probsview, d)   # Called before gradient because gradient modifies probs
-        gradient!(G, y, X, wts, reg, B, probs, Xtw)  # Modifies probs -> probs .- Y
+        gradient!(G, y, X, wts, reg, B, probs, Xtw, XtwY)
         for j = 2:k
+            # Hessian
+            set_working_weights!(view(W, :, j-1), wts, probsview, d, j-1, j-1)
             multiply_3_matrices!(XtWX, XtW, Xt, Diagonal(view(W, :, j - 1)), X)
             penalty_hessian!(XtWX, reg)
+
+            # Obtain dB via Newton-Raphson
             ldiv!(view(dB, :, j - 1), cholesky!(Hermitian(XtWX)), view(G, :, j - 1))  # Or: ldiv!(dB_j, qr!(XtWX), G_j)
         end
 
@@ -187,12 +192,19 @@ end
 # Gradient
 
 "grad(-LL + penalty)"
-function gradient!(G, y, X, wts, reg, B, probs, Xtw)
-    for (i, yi) in enumerate(y)  # probs -> probs .- Y
-        probs[i, yi] -= 1.0
-    end
+function gradient!(G, y, X, wts, reg, B, probs, Xtw, XtwY)
     mul!(G, Xtw, view(probs, :, 2:size(probs, 2)))
+    G .-= XtwY
     penalty_gradient!(G, reg, B)
+end
+
+function construct_XtwY(Xtw, y, km1)
+    result = fill(0.0, size(Xtw, 1), km1)
+    for (i, yi) in enumerate(y)
+        yi == 1 && continue
+        view(result, :, yi - 1) .+= view(Xtw, :, i)
+    end
+    result
 end
 
 ################################################################################
@@ -256,13 +268,6 @@ function set_working_weights!(w, wts::Nothing, probs, d, i, j)
     else
         Pj = view(probs, :, j)
         w .= min.(-d, -Pi .* Pj)
-    end
-end
-
-function set_working_weights!(W, wts, probs, d)
-    k = size(probs, 2)
-    for j = 1:k
-        set_working_weights!(view(W, :, j), wts, probs, d, j, j)
     end
 end
 
