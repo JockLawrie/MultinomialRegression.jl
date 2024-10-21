@@ -96,29 +96,34 @@ end
 ################################################################################
 # Solve with Coordinate Descent
 
-newtonraphson_step(dB, H, g) = ldiv!(dB, cholesky!(Hermitian(H)), g)  # Or: ldiv!(dB, qr!(H), g)
+"""
+Set the search direction dB using the Newton-Raphson method.
+That is, set dB = inv(H)*g.
+Could replace cholesky!(Hermitian(H)) with qr!(H).
+"""
+set_searchdirection_newtonraphson!(dB, H, g) = ldiv!(dB, cholesky!(Hermitian(H)), g)
 
 function fit_coordinatedescent(y, X, wts, reg, probs, iterations, f_tol)
     km1  = size(probs, 2) - 1
     n, p = size(X)
     B    = fill(0.0, p, km1)
     dB   = fill(0.0, p, km1)  # Bnew = B + dB
-    ww   = fill(0.0, n)  # 1 column of working weights = wts .* p .* (1 .- p)
-    g    = fill(0.0, p)  # 1 column of G = gradient(-LL) = -gradient(LL) = Xt * diag(wts) * (probs .- Y)
+    g    = fill(0.0, p)       # 1 column of G = gradient(-LL) = -gradient(LL) = Xt * diag(wts) * (probs .- Y)
+    H    = fill(0.0, p, p)    # A block on the diagonal of the Hessian. Xt * Diagonal(ww) * X
+    ww   = fill(0.0, n)       # 1 column of working weights = wts .* p .* (1 .- p)
     Xtw  = isnothing(wts) ? transpose(X) : transpose(X)*Diagonal(wts)
-    XtwY = construct_XtwY(Xtw, y, km1)  # Xt*diag(wts)*Y (because G = Xtw*probs .- XtwY)
-    XtW  = fill(0.0, p, n)  # Xt * Diagonal(working weights)
-    H    = fill(0.0, p, p)  # A block on the diagonal of the Hessian. Xt * Diagonal(working weights) * X
+    XtW  = fill(0.0, p, n)  # Xt * Diagonal(ww)
+    loss = loss!(y, X, wts, reg, B, probs)
+    d    = sqrt(eps())
     converged = false
     loss_prev = Inf  # Required for the warning message if convergence is not achieved
-    loss = loss!(y, X, wts, reg, B, probs)
-    d = sqrt(eps())
+    XtwY = construct_XtwY(Xtw, y, km1)  # Xt*diag(wts)*Y (because G = Xtw*probs .- XtwY)
     for iter = 1:iterations
         # Update dB
         for j = 1:km1
             gradient_group!(g, j, y, X, wts, reg, B, probs, Xtw, XtwY)
             hessian_group!(H, j, X, wts, reg, probs, XtW, ww, d)
-            newtonraphson_step(view(dB, :, j), H, g)
+            set_searchdirection_newtonraphson!(view(dB, :, j), H, g)
         end
 
         # Line search along dB
@@ -198,6 +203,16 @@ function gradient_group!(g, j, y, X, wts, reg, B, probs, Xtw, XtwY)
     penalty_gradient!(g, reg, b)
 end
 
+"""
+Let Y be the n x k matrix with i^th row being an indicator of y[i].
+That is, Y[i, :] = [0, ..., 1, 0, ..., 0], where Y[i, y[i]] = 1, i = 1:n.
+
+This function conputes: M = transpose(X)*Diagonal(wts)*Y
+because it is a constant term in the gradient calculation:
+
+gradient(-LL) = transpose(X)*Diagonal(wts)*(probs .- Y)
+              = transpose(X)*Diagonal(wts)*probs .- M
+"""
 function construct_XtwY(Xtw, y, km1)
     result = fill(0.0, size(Xtw, 1), km1)
     for (i, yi) in enumerate(y)
