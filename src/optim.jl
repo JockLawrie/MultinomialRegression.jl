@@ -73,55 +73,52 @@ end
 # Solve with LBFGS
 
 function fit_lbfgs(y, X, wts, reg, probs, opts)
-    k    = size(probs, 2)
+    km1  = size(probs, 2) - 1
     n, p = size(X)
     Xtw  = isnothing(wts) ? transpose(X) : transpose(X)*Diagonal(wts)
-    XtwY = construct_XtwY(Xtw, y, k-1)
+    XtwY = construct_XtwY(Xtw, y, km1)
     fg! = (_, g, b) -> begin
-        B = reshape(b, p, k - 1)
-        G = reshape(g, p, k - 1)
+        B = reshape(b, p, km1)
+        G = reshape(g, p, km1)
         loss = loss!(y, X, wts, reg, B, probs)
-        gradient!(G, y, X, wts, reg, B, probs, Xtw, XtwY)  # Modifies probs
+        for j = 1:km1
+            gradient_group!(view(G, :, j), j, y, X, wts, reg, B, probs, Xtw, XtwY)
+        end
         loss
     end
-    b0     = fill(0.0, p * (k - 1))
+    b0     = fill(0.0, p*km1)
     fitted = isnothing(opts) ? optimize(Optim.only_fg!(fg!), b0, LBFGS()) : optimize(Optim.only_fg!(fg!), b0, LBFGS(), opts)
     loss   = fitted.minimum
-    B      = reshape(fitted.minimizer, p, k - 1)
+    B      = reshape(fitted.minimizer, p, km1)
     loss, B
 end
 
 ################################################################################
 # Solve with Coordinate Descent
 
+newtonraphson_step(dB, H, g) = ldiv!(dB, cholesky!(Hermitian(H)), g)  # Or: ldiv!(dB, qr!(H), g)
+
 function fit_coordinatedescent(y, X, wts, reg, probs, iterations, f_tol)
-    k    = size(probs, 2)
+    km1  = size(probs, 2) - 1
     n, p = size(X)
-    B    = fill(0.0, p, k - 1)
-    dB   = fill(0.0, p, k - 1)  # Bnew = B + dB
-    W    = fill(0.0, n, k - 1)  # Working weights = W = wts .* p .* (1 .- p)
-    G    = fill(0.0, p, k - 1)  # G = gradient(-LL) = -gradient(LL) = Xt * diag(wts) * (probs .- Y)
-    Xt   = transpose(X)
+    B    = fill(0.0, p, km1)
+    dB   = fill(0.0, p, km1)  # Bnew = B + dB
+    ww   = fill(0.0, n)  # 1 column of working weights = wts .* p .* (1 .- p)
+    g    = fill(0.0, p)  # 1 column of G = gradient(-LL) = -gradient(LL) = Xt * diag(wts) * (probs .- Y)
     Xtw  = isnothing(wts) ? transpose(X) : transpose(X)*Diagonal(wts)
-    XtwY = construct_XtwY(Xtw, y, k-1)  # Xt*diag(wts)*Y (because G = Xtw*probs .- XtwY)
+    XtwY = construct_XtwY(Xtw, y, km1)  # Xt*diag(wts)*Y (because G = Xtw*probs .- XtwY)
     XtW  = fill(0.0, p, n)  # Xt * Diagonal(working weights)
-    XtWX = fill(0.0, p, p)  # Xt * Diagonal(working weights) * X
-    probsview = view(probs, :, 2:k)
+    H    = fill(0.0, p, p)  # A block on the diagonal of the Hessian. Xt * Diagonal(working weights) * X
     converged = false
     loss_prev = Inf  # Required for the warning message if convergence is not achieved
     loss = loss!(y, X, wts, reg, B, probs)
     d = sqrt(eps())
     for iter = 1:iterations
         # Update dB
-        gradient!(G, y, X, wts, reg, B, probs, Xtw, XtwY)
-        for j = 2:k
-            # Hessian
-            set_working_weights!(view(W, :, j-1), wts, probsview, d, j-1, j-1)
-            multiply_3_matrices!(XtWX, XtW, Xt, Diagonal(view(W, :, j - 1)), X)
-            penalty_hessian!(XtWX, reg)
-
-            # Obtain dB via Newton-Raphson
-            ldiv!(view(dB, :, j - 1), cholesky!(Hermitian(XtWX)), view(G, :, j - 1))  # Or: ldiv!(dB_j, qr!(XtWX), G_j)
+        for j = 1:km1
+            gradient_group!(g, j, y, X, wts, reg, B, probs, Xtw, XtwY)
+            hessian_group!(H, j, X, wts, reg, probs, XtW, ww, d)
+            newtonraphson_step(view(dB, :, j), H, g)
         end
 
         # Line search along dB
@@ -150,7 +147,7 @@ function fit_coordinatedescent(y, X, wts, reg, probs, iterations, f_tol)
 end
 
 ################################################################################
-# Loss function: loss = -loglikelihood + penalty
+# Loss function
 
 "Modifies (updates) probs"
 function loss!(y, X, wts, reg, B, probs)
@@ -191,11 +188,14 @@ end
 ################################################################################
 # Gradient
 
-"grad(-LL + penalty)"
-function gradient!(G, y, X, wts, reg, B, probs, Xtw, XtwY)
-    mul!(G, Xtw, view(probs, :, 2:size(probs, 2)))
-    G .-= XtwY
-    penalty_gradient!(G, reg, B)
+"Gradient for j^th group of parameters"
+function gradient_group!(g, j, y, X, wts, reg, B, probs, Xtw, XtwY)
+    b  = view(B, :, j)
+    c  = view(XtwY, :, j)
+    ps = view(probs, :, j+1)
+    mul!(g, Xtw, ps)
+    g .-= c
+    penalty_gradient!(g, reg, b)
 end
 
 function construct_XtwY(Xtw, y, km1)
@@ -217,57 +217,54 @@ Let k = the number of categories, and let p = the number of predictors.
 The hessian is a (k-1) x (k-1) block matrix, with block size p x p.
 In the code below, i and j denote the block indices; i.e., i and j each have k-1 values.
 """
-function hessian!(H, X, wts, reg, probs, XtW, w)
-    k  = size(probs, 2)
-    p  = size(X, 2)
-    Xt = transpose(X)
-    d  = sqrt(eps())
-    for j = 1:(k - 1)
-        for i = j:(k - 1)
-            rows = (p*(i - 1) + 1):(p*i)
-            cols = (p*(j - 1) + 1):(p*j)
-            set_working_weights!(w, wts, probs, d, i+1, j+1)
-            multiply_3_matrices!(view(H, rows, cols), XtW, Xt, Diagonal(w), X)
-        end
-    end
-    penalty_hessian!(H, reg)
-    Hermitian(H, :L)
-end
-
 function hessian(X, wts, reg, probs)
     k    = size(probs, 2)
     n, p = size(X)
     H    = fill(0.0, p*(k - 1), p*(k - 1))
     XtW  = fill(0.0, p, n)
-    w    = fill(0.0, n)
-    hessian!(H, X, wts, reg, probs, XtW, w)
+    ww   = fill(0.0, n)
+    d    = sqrt(eps())
+    for j = 1:(k - 1)
+        cols = (p*(j - 1) + 1):(p*j)
+        for i = j:(k - 1)
+            rows = (p*(i - 1) + 1):(p*i)
+            hessian_block!(view(H, rows, cols), X, wts, reg, probs, XtW, ww, d, i+1, j+1)
+        end
+    end
+    Hermitian(H, :L)
 end
 
-
-"Given matrices A, B and C, compute the matrix product ABC, obtaining AB in the process."
-function multiply_3_matrices!(ABC, AB, A, B, C)
-    mul!(AB, A, B)
-    mul!(ABC, AB, C)
+function hessian_block!(H, X, wts, reg, probs, XtW, ww, d, i, j)
+    set_working_weights!(ww, wts, probs, d, i, j)
+    mul!(XtW, transpose(X), Diagonal(ww))  # W = Diagonal(ww)
+    mul!(H, XtW, X)  # H = XtWX
+    if i == j
+        penalty_hessian!(H, reg)
+    end
+    nothing
 end
+
+"Hessian for j^th group of parameters"
+hessian_group!(H, j, X, wts, reg, probs, XtW, ww, d) = hessian_block!(H, X, wts, reg, probs, XtW, ww, d, j+1, j+1)
 
 "w .= wts .* Pi .* (delta_ij - Pj)"
-function set_working_weights!(w, wts, probs, d, i, j)
+function set_working_weights!(ww, wts, probs, d, i, j)
     Pi = view(probs, :, i)
     if i == j
-        w .= wts .* max.(d, Pi .* (1.0 .- Pi))
+        ww .= wts .* max.(d, Pi .* (1.0 .- Pi))
     else
-        Pj = view(probs, :, j)
-        w .= wts .* min.(-d, -Pi .* Pj)
+        Pj  = view(probs, :, j)
+        ww .= wts .* min.(-d, -Pi .* Pj)
     end
 end
 
-function set_working_weights!(w, wts::Nothing, probs, d, i, j)
+function set_working_weights!(ww, wts::Nothing, probs, d, i, j)
     Pi = view(probs, :, i)
     if i == j
-        w .= max.(d, Pi .* (1.0 .- Pi))
+        ww .= max.(d, Pi .* (1.0 .- Pi))
     else
-        Pj = view(probs, :, j)
-        w .= min.(-d, -Pi .* Pj)
+        Pj  = view(probs, :, j)
+        ww .= min.(-d, -Pi .* Pj)
     end
 end
 

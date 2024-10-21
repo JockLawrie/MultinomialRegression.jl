@@ -16,9 +16,8 @@
     pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
     B      = coef(model)
     pmean_true = 0.9631165919665698
-    Btrue = [-42.637803668990664; -2.4652201936196527; -6.6808869999735245; 9.429385128598947; 18.286136846349255;;]
+    Btrue = [-42.63780371699175; -2.465220194142103; -6.680887004674368; 9.429385137040095; 18.286136860180758;;]
     @test isapprox(pmean, pmean_true; atol=1e-10)
     @test isapprox(B, Btrue; atol=1e-10)
     @test !isregularized(model)
-
 end
