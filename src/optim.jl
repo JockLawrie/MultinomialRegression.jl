@@ -103,6 +103,7 @@ Could replace cholesky!(Hermitian(H)) with qr!(H).
 """
 set_searchdirection_newtonraphson!(dB, H, g) = ldiv!(dB, cholesky!(Hermitian(H)), g)
 
+"Block-wise cyclic coordinate descent"
 function fit_coordinatedescent(y, X, wts, reg, probs, iterations, f_tol)
     km1  = size(probs, 2) - 1
     n, p = size(X)
@@ -119,36 +120,58 @@ function fit_coordinatedescent(y, X, wts, reg, probs, iterations, f_tol)
     loss_prev = Inf  # Required for the warning message if convergence is not achieved
     XtwY = construct_XtwY(Xtw, y, km1)  # Xt*diag(wts)*Y (because G = Xtw*probs .- XtwY)
     for iter = 1:iterations
-        # Update dB
         for j = 1:km1
+            B_j  = view(B, :, j)
+            dB_j = view(dB, :, j)
             gradient_group!(g, j, y, X, wts, reg, B, probs, Xtw, XtwY)
             hessian_group!(H, j, X, wts, reg, probs, XtW, ww, d)
-            set_searchdirection_newtonraphson!(view(dB, :, j), H, g)
+            set_searchdirection_newtonraphson!(dB_j, H, g)
+            loss_prev = loss
+            loss = linesearch!(B_j, dB_j, y, X, wts, reg, B, probs, loss_prev)
         end
-
-        # Line search along dB
-        a = 1.0
-        loss_prev = loss
-        for i_linesearch = 1:52  # eps() == 1 / (2^52)
-            # Update B
-            if i_linesearch == 1
-                B .-= a .* dB  # The minus is due to the negative gradient used to obtain dB
-            else
-                B .+= a .* dB  # B = B + a_old*dB - a_new*dB = B + a_new*dB, since a_old = 2*a_new
-            end
-
-            # Update loss
-            loss = loss!(y, X, wts, reg, B, probs)
-            loss < loss_prev && break
-            a *= 0.5  # Smaller step size
-        end
-
-        # Check for convergence
         converged = isapprox(loss, loss_prev; atol=f_tol) || iszero(loss_prev)
         converged && break
     end
     !converged && @warn "Coordinate Descent did not converge with tolerance $(f_tol). The last change in loss was $(abs(loss - loss_prev))"
     loss, B
+end
+
+function linesearch!(B_j, dB_j, y, X, wts, reg, B, probs, loss_prev)
+    a = 1.0
+    loss = Inf
+    for i_linesearch = 1:52  # eps() == 1 / (2^52)
+        # Update B
+        if i_linesearch == 1
+            B_j .-= a .* dB_j  # The minus is due to the negative gradient used to obtain dB
+        else
+            B_j .+= a .* dB_j  # B = B + a_old*dB - a_new*dB = B + a_new*dB, since a_old = 2*a_new
+        end
+
+        # Update loss
+        loss = loss!(y, X, wts, reg, B, probs)
+        loss < loss_prev && break
+        a *= 0.5  # Smaller step size
+    end
+    loss
+end
+
+function OLDlinesearch!(B, dB, y, X, wts, reg, probs, loss_prev)
+    a = 1.0
+    loss = Inf
+    for i_linesearch = 1:52  # eps() == 1 / (2^52)
+        # Update B
+        if i_linesearch == 1
+            B .-= a .* dB  # The minus is due to the negative gradient used to obtain dB
+        else
+            B .+= a .* dB  # B = B + a_old*dB - a_new*dB = B + a_new*dB, since a_old = 2*a_new
+        end
+
+        # Update loss
+        loss = loss!(y, X, wts, reg, B, probs)
+        loss < loss_prev && break
+        a *= 0.5  # Smaller step size
+    end
+    loss
 end
 
 ################################################################################

@@ -13,8 +13,8 @@ model  = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + Pet
 iris.p = [predict(model, X[i, :]) for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
 B      = coef(model)
-ptrue  = 0.9749774974660096
-Btrue  = [4.975415294679369 -37.66545139525668; -0.5700492887839999 -3.03391914896401; -5.792929082291398 -12.471480403747798; 4.159722869456368 13.5869695098448; 3.8991764651585226 22.179722316756568]
+ptrue  = 0.9751884722895717
+Btrue  = [5.5933512043640885 -37.04400107697118; -0.7947057398635344 -3.2598929301043715; -6.164698700911791 -12.845483417203052; 4.497673083604281 13.92694696161923; 4.801476567957991 23.087375232646764]
 @test isapprox(pmean, ptrue; atol=1e-10)
 @test isapprox(B, Btrue; atol=1e-10)
 @test !isregularized(model)
@@ -55,7 +55,7 @@ Btrue  = [2.8865305259902325e-18 -4.164518643934148; -4.0003098839556167e-16 -2.
 model  = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris; reg=L2(0.5))
 iris.p = [predict(model, X[i, :]) for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
-ptrue  = 0.8709932476955317
+ptrue  = 0.8709932476955314
 Btrue  = [0.7888393490091279 -1.838072811349677; -0.19997312515915025 -1.9817654634065525; -1.821192471887549 -3.0788414903801886; 2.1840736652011756 4.507890037838502; -0.2384473104085673 3.4034321156497853]
 @test isapprox(pmean, ptrue; atol=1e-10)
 @test isapprox(coef(model), Btrue; atol=1e-10)
@@ -80,7 +80,7 @@ model = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + Peta
 w = collect(0.25:0.01:1.75)
 splice!(w, findfirst(==(1.0), w))
 model = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris; wts=w)
-Btrue = [6.035229502487764 -35.264648153156564; -0.848901014197533 -3.527483061010013; -5.3482096886032755 -11.297721710725307; 4.122088167195583 13.804194657706852; 3.297230688297391 19.845794726325643]
+Btrue = [6.676942085073142 -34.619409100680286; -1.0778950121489295 -3.7578181894598375; -5.716131504811054 -11.66786782474073; 4.442245234242203 14.126288397468311; 4.239987406936552 20.794183712616366]
 @test isapprox(coef(model), Btrue; atol=1e-10)
 
 # Test that weights are scaled to sum to the number of observations
