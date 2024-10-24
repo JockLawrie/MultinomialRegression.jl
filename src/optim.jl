@@ -39,7 +39,7 @@ function optimise(y, X, wts, reg, solver, opts, probs)
     if solver == :LBFGS
         fit_lbfgs(y, X, wts, reg, probs, opts)
     else
-        fit_coordinatedescent(y, X, wts, reg, probs, opts.iterations, opts.f_abstol)
+        blockwise_coordinatedescent(y, X, wts, reg, probs, opts.iterations, opts.f_abstol)
     end
 end
 
@@ -104,7 +104,7 @@ Could replace cholesky!(Hermitian(H)) with qr!(H).
 set_searchdirection_newtonraphson!(dB, H, g) = ldiv!(dB, cholesky!(Hermitian(H)), g)
 
 "Block-wise cyclic coordinate descent"
-function fit_coordinatedescent(y, X, wts, reg, probs, iterations, f_tol)
+function blockwise_coordinatedescent(y, X, wts, reg, probs, iterations, f_tol)
     km1  = size(probs, 2) - 1
     n, p = size(X)
     B    = fill(0.0, p, km1)
@@ -145,25 +145,6 @@ function linesearch!(B_j, dB_j, y, X, wts, reg, B, probs, loss_prev)
             B_j .-= a .* dB_j  # The minus is due to the negative gradient used to obtain dB
         else
             B_j .+= a .* dB_j  # B = B + a_old*dB - a_new*dB = B + a_new*dB, since a_old = 2*a_new
-        end
-
-        # Update loss
-        loss = loss!(y, X, wts, reg, B, probs)
-        loss < loss_prev && break
-        a *= 0.5  # Smaller step size
-    end
-    loss
-end
-
-function OLDlinesearch!(B, dB, y, X, wts, reg, probs, loss_prev)
-    a = 1.0
-    loss = Inf
-    for i_linesearch = 1:52  # eps() == 1 / (2^52)
-        # Update B
-        if i_linesearch == 1
-            B .-= a .* dB  # The minus is due to the negative gradient used to obtain dB
-        else
-            B .+= a .* dB  # B = B + a_old*dB - a_new*dB = B + a_new*dB, since a_old = 2*a_new
         end
 
         # Update loss
