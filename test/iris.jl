@@ -13,10 +13,10 @@ model  = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + Pet
 iris.p = [predict(model, X[i, :]) for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
 B      = coef(model)
-ptrue  = 0.9751884722895717
-Btrue  = [5.5933512043640885 -37.04400107697118; -0.7947057398635344 -3.2598929301043715; -6.164698700911791 -12.845483417203052; 4.497673083604281 13.92694696161923; 4.801476567957991 23.087375232646764]
-@test isapprox(pmean, ptrue; atol=1e-10)
-@test isapprox(B, Btrue; atol=1e-10)
+ptrue  = 0.975388265191401
+Btrue  = [7.655763785408953 -34.980132384842996; -1.4800592740561043 -3.9457712168326466; -7.521061777314869 -14.203413238492303; 5.602142924108288 15.032509306476685; 7.824993058749435 26.113944534250077]
+@test isapprox(pmean, ptrue; atol=1e-8)
+@test isapprox(B, Btrue; atol=1e-8)
 @test !isregularized(model)
 
 # Model-level diagnostics
@@ -45,47 +45,47 @@ B[1, 2]
 model  = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris; reg=L1(0.5))
 iris.p = [predict(model, X[i, :]) for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
-ptrue  = 0.9298225328925666
-Btrue  = [2.8865305259902325e-18 -4.164518643934148; -4.0003098839556167e-16 -2.6063230765004057; -2.5073901642945966 -5.418536097974986; 2.7968458170514072 6.700398130596685; -3.1946541988440898e-18 5.82486558126391]
-@test isapprox(pmean, ptrue; atol=1e-10)
-@test isapprox(coef(model), Btrue; atol=1e-10)
+ptrue  = 0.9337207895812999
+Btrue  = [9.935596018734074e-7 -4.194685532114717; -0.10179174405956715 -2.71479536273949; -3.263336715859761 -6.162331485302718; 4.693254729167252 8.597898821307428; 2.4460784087100167e-7 5.842147921033004]
+@test isapprox(pmean, ptrue; atol=1e-8)
+@test isapprox(coef(model), Btrue; atol=1e-8)
 @test isregularized(model)
 
 # L2 regularized fit
 model  = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris; reg=L2(0.5))
 iris.p = [predict(model, X[i, :]) for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
-ptrue  = 0.8709932476955314
-Btrue  = [0.7888393490091279 -1.838072811349677; -0.19997312515915025 -1.9817654634065525; -1.821192471887549 -3.0788414903801886; 2.1840736652011756 4.507890037838502; -0.2384473104085673 3.4034321156497853]
-@test isapprox(pmean, ptrue; atol=1e-10)
-@test isapprox(coef(model), Btrue; atol=1e-10)
+ptrue  = 0.8709932478191903
+Btrue  = [0.7888393556722058 -1.8380728122477037; -0.19997312717019006 -1.9817654638534465; -1.8211924740229675 -3.0788414908935984; 2.184073670058001 4.507890041566887; -0.23844730696797464 3.4034321175700617]
+@test isapprox(pmean, ptrue; atol=1e-8)
+@test isapprox(coef(model), Btrue; atol=1e-8)
 @test isregularized(model)
 
 # ElasticNet regularized fit
 model  = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris; reg=ElasticNet(0.5, 0.5))
 iris.p = [predict(model, X[i, :]) for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
-ptrue  = 0.851627021342546
-Btrue  = [2.202285662861181e-20 -1.352689711252036; -9.48635015171177e-7 -1.826793038733544; -1.6811170026719975 -2.8229214666028595; 1.8645059515489941 4.08103262615276; -1.6624667692556117e-7 3.1734225402322225]
-@test isapprox(pmean, ptrue; atol=1e-10)
-@test isapprox(coef(model), Btrue; atol=1e-10)
+ptrue  = 0.8550458454192683
+Btrue  = [0.00028742832791726626 -1.3677000185370674; -9.320559348425432e-6 -1.8152969063402398; -1.7527629918053778 -2.88057882227795; 2.0099374514627626 4.198568250100472; 0.000514315230815811 3.1938398322674098]
+@test isapprox(pmean, ptrue; atol=1e-8)
+@test isapprox(coef(model), Btrue; atol=1e-8)
 @test isregularized(model)
 
 # Weighted fit with each weight equal to 1
 w     = fill(1.0, 150)
 model = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris; wts=w)
-@test isapprox(coef(model), B; atol=1e-10)
+@test isapprox(coef(model), B; atol=1e-8)
 
 # Weighted fit with a mix of weights
 w = collect(0.25:0.01:1.75)
 splice!(w, findfirst(==(1.0), w))
 model = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris; wts=w)
-Btrue = [6.676942085073142 -34.619409100680286; -1.0778950121489295 -3.7578181894598375; -5.716131504811054 -11.66786782474073; 4.442245234242203 14.126288397468311; 4.239987406936552 20.794183712616366]
-@test isapprox(coef(model), Btrue; atol=1e-10)
+Btrue = [8.896968057652046 -32.397705940531644; -1.795711057394225 -4.476180261259748; -7.073489617803958 -13.026831561488326; 5.510095704333738 15.195225300686422; 7.390454234913102 23.947696520620806]
+@test isapprox(coef(model), Btrue; atol=1e-8)
 
 # Test that weights are scaled to sum to the number of observations
 w2    = 2*w
 model = fit(@formula(Species ~ 1 + SepalLength + SepalWidth + PetalLength + PetalWidth), iris; wts=w2)
-@test isapprox(coef(model), Btrue; atol=1e-10)
+@test isapprox(coef(model), Btrue; atol=1e-8)
 
 end

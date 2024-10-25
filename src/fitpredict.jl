@@ -30,13 +30,13 @@ Assumptions:
 """
 function fit(y::AbstractVector, X::AbstractMatrix{<: Real};
              yname::String="y", xnames::Union{Nothing, Vector{String}}=nothing,
-             wts::Union{Nothing, AbstractVector}=nothing, solver=nothing,
+             wts::Union{Nothing, AbstractVector}=nothing,
              reg::Union{Nothing, AbstractRegularizer}=nothing, opts::Union{Nothing, AbstractDict}=nothing)
     y, ylevels = construct_y_and_ylevels(y)
     length(ylevels) < 2 && throw(DomainError("The response variable must have at least two levels."))
     xnames = isnothing(xnames) ? ["x$(i)" for i = 1:size(X, 2)] : xnames
     format_weights!(wts)
-    loss, coef, vcov = fit_optim(y, X, wts, reg, solver, opts)
+    loss, coef, vcov = fit_optim(y, X, wts, reg, opts)
     nobs  = length(y)
     LL    = penalty(reg, reshape(coef, length(coef))) - loss  # loss = -LL + penalty
     MultinomialRegressionModel(yname, ylevels, xnames, coef, vcov, nobs, LL, loss)
