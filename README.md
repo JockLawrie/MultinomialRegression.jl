@@ -10,7 +10,7 @@ iris = dataset("datasets", "iris")
 
 # Unregularized fit
 model = fit(@formula(Species ~ 1 + SepalWidth), iris)  # levels(iris.Species)[1] is the reference category
-opts  = Dict(:iterations => 250, :f_abstol => 1e-9)    # Same terminology as Optim.Options
+opts  = Dict(:iterations => 250, :g_abstol => 1e-8)    # Same terminology as Optim.Options
 model = fit(@formula(Species ~ 1 + SepalWidth), iris; opts=opts)
 
 # Predict
@@ -42,7 +42,7 @@ B["(Intercept)", :]
 B[:, "virginica"]
 B[1, 2]  # Integer indices also work
 
-B2 = [18.85825175905592 12.997166560384215; -6.118905216314172 -4.079050714520578]
+B2 = [18.85843663920683 12.997324428062807; -6.118961548679346 -4.0790981064343335]
 isapprox(B, B2; atol=1e-10)  # Reproducible result
 
 #=

@@ -23,6 +23,7 @@ struct L1 <: AbstractRegularizer
 end
 
 penalty(reg::L1, B) = reg.gamma * norm(B, 1)
+penalty(reg::L1, bs::Vector{Vector{T}}) where {T <: Real} = sum(penalty(reg, b) for b in bs)
 
 function penalty_gradient!(gradB, reg::L1, B)
     gamma = reg.gamma
@@ -49,6 +50,8 @@ function penalty(reg::L2, B)
     B_2norm = norm(B, 2)
     0.5 * lambda * B_2norm * B_2norm
 end
+
+penalty(reg::L2, bs::Vector{Vector{T}}) where {T <: Real} = sum(penalty(reg, b) for b in bs)
 
 function penalty_gradient!(gradB, reg::L2, B)
     lambda  = reg.lambda

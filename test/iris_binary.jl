@@ -14,11 +14,10 @@ y      = iris.species_binary
 X      = Matrix(iris[:, ["intercept", "SepalLength", "SepalWidth", "PetalLength", "PetalWidth"]])
 iris.p = [predict(model, X[i, :]) for i = 1:nrow(iris)]
 pmean  = mean([iris.p[i][y[i]] for i = 1:nrow(iris)])
-B      = coef(model)
-pmean_true = 0.9631165919680381
-Btrue = [-42.637803818896174; -2.4652201950669275; -6.68088701510546; 9.429385154754188; 18.286136890212777;;]
+pmean_true = 0.9631165919656941
+Btrue = [-42.637803809514956; -2.4652201952583055; -6.680887013465507; 9.42938515343284; 18.28613688644081;;]
 @test isapprox(pmean, pmean_true; atol=1e-8)
-@test isapprox(B, Btrue; atol=1e-8)
+@test isapprox(coef(model), Btrue; atol=1e-8)
 @test !isregularized(model)
 
 end

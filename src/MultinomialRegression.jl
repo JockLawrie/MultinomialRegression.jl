@@ -7,11 +7,13 @@ export MultinomialRegressionModel, @formula, fit, predict, predict!,  # Fit/pred
 
 # Fit/predict
 include("regularization.jl")
+include("blockwise_coordinate_descent.jl")
 include("optim.jl")
 include("fitpredict.jl")
 using .regularization  # Independent
-using .optim           # Depends on: regularization
-using .fitpredict      # Depends on: regularization
+using .blockwise_coord_descent  # Independent
+using .optim           # Depends on: regularization, blockwise_coord_descent
+using .fitpredict      # Depends on: regularization, optim
 
 # Diagnostics
 include("diagnostics.jl")
