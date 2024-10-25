@@ -22,10 +22,10 @@ function blockwise_coordinate_descent(f, block_gradient!, block_hessian!, y, Xs,
             block_searchdirection!(dθ[b], H[b], g[b])
             loss = linesearch!(θ[b], dθ[b], f, y, Xs, w, θ, cache, loss)
         end
-        converged = isapprox(maxabs(dθ), 0.0; atol=g_abstol)
+        converged = isapprox(maxabs(g), 0.0; atol=g_abstol)
         converged && break
     end
-    !converged && @warn "Blockwise Coordinate Descent did not converge: gnorm = $(maxabs(dθ)) > g_abstol ($(g_abstol))."
+    !converged && @warn "Blockwise Coordinate Descent did not converge: gnorm = $(maxabs(g)) > g_abstol ($(g_abstol))."
     loss, θ
 end
 
