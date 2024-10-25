@@ -7,20 +7,20 @@ using LinearAlgebra
 "Cyclic blockwise coordinate descent"
 function blockwise_coordinate_descent(f, block_gradient!, block_hessian!, y, Xs, w, opts, cache)
     checkinputs(y, Xs, w)
-    θ    = initθ(Xs)
-    dθ   = [fill(0.0, length(block)) for block in θ]  # θnew = θ + a*dθ for some a
-    g    = [fill(0.0, length(block)) for block in θ]  # Gradient for each block
-    H    = [fill(0.0, length(block), length(block)) for block in θ]  # Hessian for each block
+    θ = initθ(Xs)
+    s = [fill(0.0, length(block)) for block in θ]  # Search direction: θnew = θ + a*s for some scalar a
+    g = [fill(0.0, length(block)) for block in θ]  # Gradient for each block
+    H = [fill(0.0, length(block), length(block)) for block in θ]  # Hessian for each block
     loss = f(y, Xs, w, θ, cache)
     iterations = opts[:iterations]
     g_abstol   = opts[:g_abstol]
     converged  = false
     for iter = 1:iterations
-        for (b, dθ_b) in enumerate(dθ)
+        for (b, sb) in enumerate(s)
             block_gradient!(g, b, y, Xs, w, θ, cache)
             block_hessian!(H, b, Xs, w, cache)
-            block_searchdirection!(dθ[b], H[b], g[b])
-            loss = linesearch!(θ[b], dθ[b], f, y, Xs, w, θ, cache, loss)
+            block_searchdirection!(sb, H[b], g[b])
+            loss = linesearch!(θ[b], sb, f, y, Xs, w, θ, cache, loss)
         end
         converged = isapprox(maxabs(g), 0.0; atol=g_abstol)
         converged && break
@@ -49,34 +49,34 @@ function initθ(Xs)
 end
 
 """
-For block b, set the search direction dθ[b] using the Newton-Raphson method.
-That is, set dθ[b] = inv(H[b])*g[b].
+For block b, set the search direction s[b] using the Newton-Raphson method.
+That is, set s[b] = inv(H[b])*g[b].
 Could replace qr!(H) with cholesky!(Hermitian(H)); the former is more stable but slower.
 """
-block_searchdirection!(dθ, H, g) = ldiv!(dθ, qr!(H), g)
+block_searchdirection!(s, H, g) = ldiv!(s, qr!(H), g)
 
 """
-Basic line search, θ -> θ + a*dθ, for some a.
+Basic line search, θ -> θ + a*s, for some a.
 
 1. Start with a large step size, a = 2, and a step size multiplier m in (0, 1).
-2. Set B = B - a*dB
-3. If loss(B, ...) < prevloss, return loss, else a *= m and go back to Step 2.
+2. Set θb = θb - a*sb
+3. If loss(θ, ...) < prevloss, return loss, else a *= m and go back to Step 2.
 """
-function linesearch!(θ_j, dθ_j, f, y, Xs, w, θ, cache, prevloss)
+function linesearch!(θb, sb, f, y, Xs, w, θ, cache, prevloss)
     loss  = Inf
     aprev = 0.0  # Previous step size
     a     = 2.0  # Initial step size
     m     = 0.8  # At each iteration, multiply the step size by m
     while a > 1e-7
-        # Update θ
+        # Update θb
         c = aprev - a
-        θ_j .+= c .* dθ_j  # θ = θ + a_old*dθ - a_new*dθ = θ + (a_old - a_new)*dθ = θ + c*dθ
+        θb .+= c .* sb  # θb = θb + aprev*sb - a*sb = θb + (aprev - a)*sb = θb + c*sb
 
         # Update loss
         loss = f(y, Xs, w, θ, cache)
         loss < prevloss && break
         aprev = a
-        a    *= m  # Smaller step size
+        a *= m  # Smaller step size
     end
     loss
 end
